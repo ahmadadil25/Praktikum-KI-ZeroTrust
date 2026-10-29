@@ -7,3 +7,4 @@ data/*.sqlite-wal
 coverage/
 *.log
 .DS_Store
+

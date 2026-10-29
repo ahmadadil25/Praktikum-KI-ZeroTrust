@@ -10,7 +10,7 @@
     "start:transkrip": "node service-transkrip/server.js",
     "seed": "node database/seed.js",
     "reset": "node database/reset.js",
-    "test": "node --test tests/**/*.test.js"
+    "test": "node --test --test-concurrency=1 tests/**/*.test.js"
   },
   "keywords": [
     "zero-trust",

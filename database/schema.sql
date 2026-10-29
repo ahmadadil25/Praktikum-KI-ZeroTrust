@@ -89,3 +89,4 @@ CREATE INDEX IF NOT EXISTS idx_grades_mahasiswa ON grades(mahasiswa_id);
 CREATE INDEX IF NOT EXISTS idx_grades_kelas ON grades(kelas_id);
 CREATE INDEX IF NOT EXISTS idx_classes_dosen ON classes(dosen_id);
 CREATE INDEX IF NOT EXISTS idx_audit_waktu ON audit_logs(waktu);
+

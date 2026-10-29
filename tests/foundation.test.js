@@ -8,6 +8,7 @@ const nilaiApp = require('../service-nilai/app');
 const transkripApp = require('../service-transkrip/app');
 const { getDb, closeDb } = require('../shared/db');
 const { runSeed } = require('../database/seed');
+const { resetDatabase } = require('../database/reset');
 const config = require('../shared/config');
 const { ROLES, DEVICE_STATUS, GRADE_STATUS } = require('../shared/constants');
 
@@ -15,9 +16,9 @@ describe('Tahap 1: Fondasi, Database, & Health Check', () => {
   let db;
 
   before(() => {
-    // Jalankan seeding database untuk memastikan state awal siap
+    // Reset database ke kondisi awal yang bersih
+    resetDatabase();
     db = getDb();
-    runSeed(db);
   });
 
   after(() => {
