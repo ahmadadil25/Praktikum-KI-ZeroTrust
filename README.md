@@ -124,18 +124,32 @@ Konfigurasi disimpan pada file `.env` di root direktori (template di `.env.examp
 npm install
 ```
 
-### 2. Inisialisasi Database
-Jalankan skrip seed idempotent:
+### 2. Inisialisasi & Reset Database
+Untuk melakukan inisialisasi awal (idempotent, aman dijalankan berulang):
 ```bash
 npm run seed
 ```
-*(Atau jalankan `npm run reset` jika ingin membersihkan seluruh tabel dan seed ulang).*
+Jika ingin mereset seluruh database ke kondisi awal bersih praktikum (drop & re-seed data demo):
+```bash
+npm run reset
+```
 
-### 3. Menjalankan Ketiga Layanan Sekaligus
+### 3. Urutan Startup Layanan (Startup Order)
+Sesuai arsitektur Zero Trust dan dependensi downstream:
+1. **Layanan Resource Internal (Downstream)**:
+   - **Service Nilai** (`port 3001`): `npm run start:nilai` (opsional jika manual)
+   - **Service Transkrip** (`port 3002`): `npm run start:transkrip` (opsional jika manual)
+2. **API Gateway (PEP Perimeter)**:
+   - **API Gateway** (`port 3000`): `npm run start:gateway` (opsional jika manual)
+
+**Cara Praktis (Menjalankan Ketiganya Sekaligus)**:
 ```bash
 npm start
 ```
-*Layanan berjalan pada: Gateway (`http://localhost:3000`), Service Nilai (`http://localhost:3001`), Service Transkrip (`http://localhost:3002`).*
+*Script ini secara otomatis menginisialisasi database dan menjalankan ketiga layanan sekaligus:*
+- API Gateway (PEP): `http://localhost:3000`
+- Service Nilai: `http://localhost:3001`
+- Service Transkrip: `http://localhost:3002`
 
 ---
 
@@ -207,16 +221,29 @@ curl -X POST http://localhost:3000/auth/logout \
   -d '{"refresh_token": "<REFRESH_TOKEN>"}'
 ```
 
+### 8. Koleksi Postman
+Tersedia koleksi Postman siap pakai di folder `postman/zero-trust-sistem-nilai.postman_collection.json`.
+Koleksi ini mencakup 28 pengujian yang dikelompokkan ke dalam 5 folder skenario:
+1. `01 - Autentikasi & Token Management` (Login valid/invalid, device binding, refresh token, token revocation logout, service token).
+2. `02 - Akses & Modifikasi Nilai` (ABAC mahasiswa/dosen, jam akses 07.00-21.00 WIB, status final immutability, type juggling validation).
+3. `03 - Finalisasi Kelas & Sinkronisasi` (Finalisasi kelas pengampu, token service sync, penolakan token user).
+4. `04 - Akses Transkrip Akademik` (Transkrip pribadi, isolasi data mahasiswa lain, hak akses admin, penolakan dosen).
+5. `05 - Pengujian Bypass Langsung` (Verifikasi kegagalan bypass direct access ke port 3001 & 3002 tanpa Gateway).
+
+*Cara Menggunakan di Postman:*
+1. Buka Postman -> Klik **Import** -> Pilih file `postman/zero-trust-sistem-nilai.postman_collection.json`.
+2. Jalankan request `1.1 Login Dosen Budi` terlebih dahulu; script tes akan otomatis menyimpan `tokenDosenBudi` dan variabel lain ke Collection Variables.
+
 ---
 
 ## 7. Pengujian Otomatis & Skenario Zero Trust
 
-Jalankan seluruh rangkaian uji coba (52 test case pada 18 test suite):
+Jalankan seluruh rangkaian uji coba otomatis (**64 test case pada 19 test suite**):
 ```bash
 npm test
 ```
 
-### Cakupan 14 Skenario Pengujian Wajib:
+### Cakupan Skenario Pengujian Wajib & Regression Tests:
 1. **Mahasiswa hanya melihat nilai miliknya**: Terverifikasi pada `GET /nilai` dan `GET /nilai/:id`.
 2. **Mahasiswa ditolak ketika mengakses nilai atau transkrip mahasiswa lain**: Terverifikasi dengan HTTP 403 Forbidden.
 3. **Dosen hanya dapat mengubah nilai kelas yang diampunya**: Percobaan Dosen Budi mengubah nilai kelas Dosen Siti ditolak dengan HTTP 403 Forbidden.
@@ -231,3 +258,12 @@ npm test
 12. **Setiap keputusan akses tercatat di audit log**: Keputusan `ALLOW` dan `DENY` tersimpan di tabel `audit_logs` tanpa membocorkan rahasia atau raw token.
 13. **Pengulangan sinkronisasi tidak membuat duplikasi data**: Transaksi upsert idempoten menjamin data transkrip konsisten tanpa duplikasi.
 14. **Kegagalan sinkronisasi ditangani dengan benar**: Jika downstream transkrip mengalami kegagalan, Service Nilai mengembalikan HTTP 502 dan tidak memberikan respons sukses palsu.
+15. **Token Service ditolak saat mengakses endpoint user**: Terverifikasi bahwa `role: service` ditolak pada `GET /nilai`, `PUT /nilai/:id`, `POST /kelas/:id/finalisasi`, dan `GET /transkrip/:nim`.
+16. **Validasi input ketat terhadap Type Juggling**: Nilai bertipe boolean, array, atau di luar rentang 0-100 ditolak dengan HTTP 400 Bad Request.
+17. **Proteksi Bypass Jam Akses di Lingkungan Produksi**: Header `X-Simulated-Hour` diabaikan secara total pada mode produksi.
+18. **Pencegahan Bypass Header Device ID**: Device ID hanya diterima melalui header HTTP resmi `X-Device-ID`, bukan melalui body.
+
+---
+
+## 8. Laporan Audit Keamanan (Security Review)
+Laporan mendalam hasil audit keamanan Zero Trust, analisis kerentanan (CWE/OWASP), dan mitigasi yang telah diterapkan dapat dibaca pada file [SECURITY_REVIEW.md](file:///./SECURITY_REVIEW.md).

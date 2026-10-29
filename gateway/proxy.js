@@ -25,6 +25,7 @@ function createServiceProxy(targetBaseUrl) {
       delete forwardHeaders['x-user-role'];
       delete forwardHeaders['x-user-id'];
       delete forwardHeaders['x-role'];
+      delete forwardHeaders['x-simulated-hour'];
 
       // Sisipkan Gateway Secret resmi wajib sesuai spesifikasi Zero Trust (NIST SP 800-207)
       forwardHeaders['x-gateway-secret'] = config.gatewaySecret;

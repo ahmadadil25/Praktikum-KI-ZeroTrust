@@ -6,6 +6,13 @@ const { ROLES } = require('../shared/constants');
 
 const app = express();
 
+// Security Headers (Defense in Depth)
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  next();
+});
+
 app.use(express.json());
 
 // Endpoint Health Check (Publik untuk pemantauan layanan)
@@ -159,14 +166,22 @@ app.post('/transkrip/sinkron', (req, res) => {
     `);
 
     for (const item of gradesToSync) {
-      const letterGrade = toLetterGrade(Number(item.nilai));
+      // Validasi kelengkapan atribut per item (Defense in Depth)
+      if (!item.mahasiswa_id || !item.kode_kelas || item.nilai === undefined || item.nilai === null) {
+        continue;
+      }
+      const numScore = Number(item.nilai);
+      if (isNaN(numScore) || !Number.isFinite(numScore) || numScore < 0 || numScore > 100) {
+        continue;
+      }
+      const letterGrade = toLetterGrade(numScore);
       insertOrUpdate.run({
         mahasiswa_id: item.mahasiswa_id,
         kelas_id: item.kelas_id || kelas_id,
         kode_kelas: item.kode_kelas,
         mata_kuliah: item.mata_kuliah,
         sks: item.sks || 3,
-        nilai_angka: Number(item.nilai),
+        nilai_angka: numScore,
         nilai_huruf: letterGrade,
       });
     }
@@ -183,6 +198,12 @@ app.post('/transkrip/sinkron', (req, res) => {
 
 // Penanganan error terpusat tanpa membocorkan stack trace ke client
 app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    return res.status(400).json({
+      error: 'Bad Request',
+      reason: 'Format payload JSON tidak valid',
+    });
+  }
   console.error('[SERVICE TRANSKRIP ERROR]', err.message);
   res.status(err.status || 500).json({
     error: 'Internal Server Error',

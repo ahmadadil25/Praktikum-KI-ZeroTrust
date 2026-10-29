@@ -539,4 +539,162 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
       });
     });
   });
+
+  describe('10. Security Review Regression Tests (Audit Keamanan Menyeluruh)', () => {
+    it('SR.1: Token Service DITOLAK saat mencoba mengakses GET /nilai pengguna (403)', async () => {
+      const res = await request(gatewayApp)
+        .get('/nilai')
+        .set('Authorization', `Bearer ${tokenService}`);
+
+      assert.equal(res.status, 403);
+      assert.ok(res.body.reason.includes('service'));
+    });
+
+    it('SR.2: Token Service DITOLAK saat mencoba mengakses GET /nilai/:id (403)', async () => {
+      const res = await request(gatewayApp)
+        .get('/nilai/1')
+        .set('Authorization', `Bearer ${tokenService}`);
+
+      assert.equal(res.status, 403);
+      assert.ok(res.body.reason.includes('service'));
+    });
+
+    it('SR.3: Token Service DITOLAK saat mencoba melakukan PUT /nilai/:id (403)', async () => {
+      const res = await request(gatewayApp)
+        .put('/nilai/1')
+        .set('Authorization', `Bearer ${tokenService}`)
+        .send({ nilai: 90 });
+
+      assert.equal(res.status, 403);
+      assert.ok(res.body.reason.includes('Hanya dosen'));
+    });
+
+    it('SR.4: Token Service DITOLAK saat mencoba POST /kelas/:id/finalisasi (403)', async () => {
+      const res = await request(gatewayApp)
+        .post('/kelas/1/finalisasi')
+        .set('Authorization', `Bearer ${tokenService}`);
+
+      assert.equal(res.status, 403);
+      assert.ok(res.body.reason.includes('Hanya dosen'));
+    });
+
+    it('SR.5: Token Service DITOLAK saat mencoba melihat transkrip GET /transkrip/:nim (403)', async () => {
+      const res = await request(gatewayApp)
+        .get('/transkrip/220101')
+        .set('Authorization', `Bearer ${tokenService}`);
+
+      assert.equal(res.status, 403);
+      assert.ok(res.body.reason.includes('service'));
+    });
+
+    it('SR.6: Login DITOLAK jika X-Device-ID dikirim melalui body tanpa header (400)', async () => {
+      const res = await request(gatewayApp)
+        .post('/auth/login')
+        .send({
+          username: 'dosen_budi',
+          password: 'Password123!',
+          device_id: deviceDosenBudi, // Dalam body, bukan header
+        });
+
+      assert.equal(res.status, 400);
+      assert.ok(res.body.reason.includes('X-Device-ID'));
+    });
+
+    it('SR.7: Validasi input ketat nilai: tipe boolean {nilai: true} DITOLAK (400)', async () => {
+      // Pastikan status_final = 0 untuk menguji validasi nilai di service
+      db.prepare('UPDATE grades SET status_final = 0 WHERE id = 1').run();
+
+      const res = await request(gatewayApp)
+        .put('/nilai/1')
+        .set('Authorization', `Bearer ${tokenDosenBudi}`)
+        .set('x-device-id', deviceDosenBudi)
+        .set('x-simulated-hour', '10')
+        .send({ nilai: true });
+
+      assert.equal(res.status, 400);
+      assert.equal(res.body.error, 'Bad Request');
+    });
+
+    it('SR.8: Validasi input ketat nilai: tipe array {nilai: []} DITOLAK (400)', async () => {
+      const res = await request(gatewayApp)
+        .put('/nilai/1')
+        .set('Authorization', `Bearer ${tokenDosenBudi}`)
+        .set('x-device-id', deviceDosenBudi)
+        .set('x-simulated-hour', '10')
+        .send({ nilai: [] });
+
+      assert.equal(res.status, 400);
+      assert.equal(res.body.error, 'Bad Request');
+    });
+
+    it('SR.9: Validasi input ketat nilai: rentang nilai di luar 0-100 DITOLAK (400)', async () => {
+      const resOver = await request(gatewayApp)
+        .put('/nilai/1')
+        .set('Authorization', `Bearer ${tokenDosenBudi}`)
+        .set('x-device-id', deviceDosenBudi)
+        .set('x-simulated-hour', '10')
+        .send({ nilai: 105 });
+
+      assert.equal(resOver.status, 400);
+
+      const resUnder = await request(gatewayApp)
+        .put('/nilai/1')
+        .set('Authorization', `Bearer ${tokenDosenBudi}`)
+        .set('x-device-id', deviceDosenBudi)
+        .set('x-simulated-hour', '10')
+        .send({ nilai: -1 });
+
+      assert.equal(resUnder.status, 400);
+    });
+
+    it('SR.10: Proteksi X-Simulated-Hour diabaikan di lingkungan produksi', async () => {
+      const prevEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+
+      try {
+        // Pada jam 22.00 aktual jika malam, tapi kita kirim simulasi 10 (siang)
+        // Jika sistem di luar jam akses saat ini (atau jika jam sistem di luar 7-21),
+        // simulasi tidak boleh memotong jam riil jika NODE_ENV === 'production'
+        // Jika jam server saat ini di luar jam operasional (cth: jam 03.00 pagi WIB),
+        // request dengan header x-simulated-hour: 10 harus tetap DITOLAK!
+        const currentWIBHour = new Intl.DateTimeFormat('en-US', {
+          timeZone: 'Asia/Jakarta',
+          hour: 'numeric',
+          hour12: false,
+        }).format(new Date());
+        const hourNum = parseInt(currentWIBHour, 10);
+
+        if (hourNum < 7 || hourNum >= 21) {
+          const res = await request(gatewayApp)
+            .put('/nilai/1')
+            .set('Authorization', `Bearer ${tokenDosenBudi}`)
+            .set('x-device-id', deviceDosenBudi)
+            .set('x-simulated-hour', '14') // Header dipalsukan seolah jam 14.00
+            .send({ nilai: 88 });
+
+          assert.equal(res.status, 403, 'Di mode produksi, X-Simulated-Hour harus diabaikan dan akses ditolak');
+        }
+      } finally {
+        process.env.NODE_ENV = prevEnv;
+      }
+    });
+
+    it('SR.11: Response menyertakan Security Headers (X-Content-Type-Options & X-Frame-Options)', async () => {
+      const res = await request(gatewayApp).get('/health');
+      assert.equal(res.headers['x-content-type-options'], 'nosniff');
+      assert.equal(res.headers['x-frame-options'], 'DENY');
+    });
+
+    it('SR.12: Defense in Depth Service Nilai menolak token mahasiswa langsung meski membawa secret (403)', async () => {
+      const res = await request(nilaiApp)
+        .put('/nilai/1')
+        .set('x-gateway-secret', config.gatewaySecret)
+        .set('Authorization', `Bearer ${tokenMhsAhmad}`)
+        .send({ nilai: 90 });
+
+      assert.equal(res.status, 403);
+      assert.equal(res.body.error, 'Forbidden');
+      assert.ok(res.body.reason.includes('Hanya dosen'));
+    });
+  });
 });

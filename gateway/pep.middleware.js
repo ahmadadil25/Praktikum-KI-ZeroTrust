@@ -3,6 +3,7 @@ const { getDb } = require('../shared/db');
 const { recordAuditLog } = require('../shared/audit');
 const { AUDIT_RESULT, HEADERS, ROLES } = require('../shared/constants');
 const { evaluatePolicy } = require('./policy');
+const config = require('../shared/config');
 
 /**
  * Middleware Policy Enforcement Point (PEP)
@@ -19,7 +20,11 @@ function enforcePolicy(req, res, next) {
   const endpoint = `${req.method.toUpperCase()} ${fullPath}`;
   const authHeader = req.headers[HEADERS.AUTHORIZATION] || req.headers['authorization'];
   const deviceIdHeader = req.headers[HEADERS.DEVICE_ID] || req.headers['x-device-id'] || null;
-  const simulatedHourHeader = req.headers['x-simulated-hour'] || null;
+  
+  // Keamanan Zero Trust: X-Simulated-Hour hanya diizinkan untuk pengujian otomatis (test/dev)
+  // Header ini diabaikan secara total jika pada lingkungan produksi untuk mencegah bypass jam akses
+  const isTestOrDev = process.env.NODE_ENV !== 'production' && config.env !== 'production';
+  const simulatedHourHeader = isTestOrDev ? (req.headers['x-simulated-hour'] || null) : null;
 
   // 1. Ekstraksi Token dari Header Authorization
   if (!authHeader || !authHeader.startsWith('Bearer ')) {

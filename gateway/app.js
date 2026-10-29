@@ -11,6 +11,13 @@ const { createServiceProxy } = require('./proxy');
 
 const app = express();
 
+// Security Headers (Defense in Depth)
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  next();
+});
+
 app.use(express.json());
 
 // 1. Health Check Endpoint
@@ -61,6 +68,12 @@ app.get('/', (req, res) => {
 
 // 4. Centralized Error Handler (tanpa membocorkan stack trace ke client)
 app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    return res.status(400).json({
+      error: 'Bad Request',
+      reason: 'Format payload JSON tidak valid',
+    });
+  }
   console.error('[GATEWAY ERROR]', err.message);
   res.status(err.status || 500).json({
     error: 'Internal Server Error',

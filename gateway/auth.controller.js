@@ -14,8 +14,6 @@ function getDeviceIdFromReq(req) {
   return (
     req.headers[HEADERS.DEVICE_ID] ||
     req.headers['x-device-id'] ||
-    req.body.device_id ||
-    req.body.deviceId ||
     null
   );
 }

@@ -6,6 +6,13 @@ const { ROLES } = require('../shared/constants');
 
 const app = express();
 
+// Security Headers (Defense in Depth)
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  next();
+});
+
 app.use(express.json());
 
 // Endpoint Health Check (Publik untuk pemantauan layanan)
@@ -154,6 +161,14 @@ app.put('/nilai/:id', (req, res) => {
   const gradeId = parseInt(req.params.id, 10);
   const { nilai } = req.body || {};
 
+  // Validasi Role di tingkat Service (Defense in Depth)
+  if (!req.user || req.user.role !== ROLES.DOSEN) {
+    return res.status(403).json({
+      error: 'Forbidden',
+      reason: 'Hanya dosen yang diizinkan mengubah nilai',
+    });
+  }
+
   if (isNaN(gradeId)) {
     return res.status(400).json({
       error: 'Bad Request',
@@ -161,7 +176,18 @@ app.put('/nilai/:id', (req, res) => {
     });
   }
 
-  if (nilai === undefined || nilai === null || isNaN(nilai) || Number(nilai) < 0 || Number(nilai) > 100) {
+  // Validasi ketat tipe data dan rentang nilai (mencegah type juggling seperti boolean/object)
+  if (
+    nilai === undefined ||
+    nilai === null ||
+    typeof nilai === 'boolean' ||
+    typeof nilai === 'object' ||
+    (typeof nilai === 'string' && nilai.trim() === '') ||
+    isNaN(Number(nilai)) ||
+    !Number.isFinite(Number(nilai)) ||
+    Number(nilai) < 0 ||
+    Number(nilai) > 100
+  ) {
     return res.status(400).json({
       error: 'Bad Request',
       reason: 'Nilai harus berupa angka valid antara 0 dan 100',
@@ -230,6 +256,14 @@ app.put('/nilai/:id', (req, res) => {
 app.post('/kelas/:id/finalisasi', async (req, res) => {
   const db = getDb();
   const classId = parseInt(req.params.id, 10);
+
+  // Validasi Role di tingkat Service (Defense in Depth)
+  if (!req.user || req.user.role !== ROLES.DOSEN) {
+    return res.status(403).json({
+      error: 'Forbidden',
+      reason: 'Hanya dosen pengampu yang diizinkan memfinalisasi kelas',
+    });
+  }
 
   if (isNaN(classId)) {
     return res.status(400).json({
@@ -335,6 +369,12 @@ app.post('/kelas/:id/finalisasi', async (req, res) => {
 
 // Penanganan error terpusat tanpa membocorkan stack trace ke client
 app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    return res.status(400).json({
+      error: 'Bad Request',
+      reason: 'Format payload JSON tidak valid',
+    });
+  }
   console.error('[SERVICE NILAI ERROR]', err.message);
   res.status(err.status || 500).json({
     error: 'Internal Server Error',

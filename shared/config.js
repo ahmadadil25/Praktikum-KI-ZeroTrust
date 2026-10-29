@@ -47,5 +47,12 @@ const config = {
   },
 };
 
+// Validasi keamanan: peringatan jika kunci secret menggunakan nilai default di lingkungan produksi
+if (process.env.NODE_ENV === 'production') {
+  if (config.jwt.accessSecret.includes('default') || config.gatewaySecret.includes('default')) {
+    console.warn('[SECURITY WARNING] Kunci secret default terdeteksi pada mode produksi! Harap atur environment variables yang aman.');
+  }
+}
+
 module.exports = config;
 
