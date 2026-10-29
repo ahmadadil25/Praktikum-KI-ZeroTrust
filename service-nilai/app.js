@@ -308,6 +308,13 @@ app.post('/kelas/:id/finalisasi', async (req, res) => {
 
   const finalizedGrades = finalizeTx();
 
+  if (!finalizedGrades || finalizedGrades.length === 0) {
+    return res.status(400).json({
+      error: 'Bad Request',
+      reason: `Tidak ada data nilai mahasiswa pada kelas ID ${classId} untuk difinalisasi`,
+    });
+  }
+
   // Pemanggilan Antar-Service sesuai Arsitektur Zero Trust:
   // 1. Dapatkan Token Service dari Gateway (POST /auth/service)
   // 2. Kirim data nilai final ke Service Transkrip melalui Gateway (POST /transkrip/sinkron)
@@ -325,7 +332,7 @@ app.post('/kelas/:id/finalisasi', async (req, res) => {
 
     if (!tokenRes.ok) {
       const errBody = await tokenRes.json().catch(() => ({}));
-      throw new Error(`Gagal memperoleh service token dari Gateway (${tokenRes.status}): ${errBody.reason || tokenRes.statusText}`);
+      throw new Error(`Gagal memperoleh service token dari Gateway (${tokenRes.status}): ${errBody.reason || tokenRes.statusText || 'Gagal'}`);
     }
 
     const { access_token: serviceToken } = await tokenRes.json();
@@ -345,17 +352,24 @@ app.post('/kelas/:id/finalisasi', async (req, res) => {
 
     if (!syncRes.ok) {
       const errJson = await syncRes.json().catch(() => ({}));
-      throw new Error(`Sinkronisasi transkrip ditolak oleh gateway (${syncRes.status}): ${errJson.reason || syncRes.statusText}`);
+      throw new Error(`Sinkronisasi transkrip ditolak oleh gateway (${syncRes.status}): ${errJson.reason || syncRes.statusText || 'Ditolak'}`);
     }
 
     syncResult = await syncRes.json();
   } catch (syncError) {
     console.error('[SERVICE NILAI ERROR] Gagal melakukan sinkronisasi transkrip via Gateway:', syncError.message);
-    // Sesuai Spesifikasi C.8: Jangan laporkan berhasil jika database transkrip belum terupdate!
+    // Sesuai Spesifikasi C.8: Hindari status setengah-selesai jika terjadi kegagalan jaringan
+    // Batalkan status final pada nilai lokal agar data tetap konsisten dan dapat diulang kembali dengan aman
+    db.prepare(`
+      UPDATE grades
+      SET status_final = 0, updated_at = datetime('now', 'localtime')
+      WHERE kelas_id = ?
+    `).run(classId);
+
     return res.status(502).json({
       status: 'error',
       error: 'Synchronization Failed',
-      message: `Nilai berhasil difinalisasi secara lokal, namun sinkronisasi transkrip melalui gateway gagal: ${syncError.message}. Silakan lakukan percobaan ulang finalisasi.`,
+      message: `sinkronisasi transkrip melalui gateway gagal: ${syncError.message}. Status finalisasi dibatalkan untuk menghindari status inkonsisten (setengah-selesai). Silakan lakukan percobaan ulang finalisasi.`,
       kelas_id: classId,
     });
   }

@@ -21,9 +21,10 @@ const { checkAccessHours } = require('../shared/time');
 function evaluatePolicy(context) {
   const { user, method, path, params = {}, simulatedHour = null } = context;
   const db = getDb();
-  // Normalisasi path: lowercase dan hapus trailing slash (kecuali root '/')
-  const normalizedPath = (path.toLowerCase().replace(/\/+$/, '') || '/');
-  const upperMethod = method.toUpperCase();
+  // Normalisasi path: pisahkan query string, lowercase, dan hapus trailing slash (kecuali root '/')
+  const cleanPath = (path || '').split('?')[0];
+  const normalizedPath = (cleanPath.toLowerCase().replace(/\/+$/, '') || '/');
+  const upperMethod = (method || '').toUpperCase();
 
   // 1. Kebijakan untuk: GET /nilai (Daftar Nilai)
   if (upperMethod === 'GET' && (normalizedPath === '/nilai' || normalizedPath === '/nilai/')) {
@@ -71,7 +72,7 @@ function evaluatePolicy(context) {
     }
 
     if (user.role === ROLES.MAHASISWA) {
-      if (grade.mahasiswa_id === user.sub) {
+      if (Number(grade.mahasiswa_id) === Number(user.sub)) {
         return {
           allowed: true,
           statusCode: 200,
@@ -86,7 +87,7 @@ function evaluatePolicy(context) {
     }
 
     if (user.role === ROLES.DOSEN) {
-      if (grade.dosen_id === user.sub) {
+      if (Number(grade.dosen_id) === Number(user.sub)) {
         return {
           allowed: true,
           statusCode: 200,
@@ -148,7 +149,7 @@ function evaluatePolicy(context) {
     }
 
     // Verifikasi apakah dosen adalah pengampu kelas bersangkutan
-    if (grade.dosen_id !== user.sub) {
+    if (Number(grade.dosen_id) !== Number(user.sub)) {
       return {
         allowed: false,
         statusCode: 403,
@@ -206,7 +207,7 @@ function evaluatePolicy(context) {
       };
     }
 
-    if (classRow.dosen_id !== user.sub) {
+    if (Number(classRow.dosen_id) !== Number(user.sub)) {
       return {
         allowed: false,
         statusCode: 403,
