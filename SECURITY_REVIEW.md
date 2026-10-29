@@ -29,34 +29,36 @@ Prinsip evaluasi didasarkan pada tiga pilar inti NIST SP 800-207:
 ```
 [ Klien Eksternal (Postman / curl) ]
                │
-               │ HTTPS/HTTP (Access Token + X-Device-ID)
+               │ HTTP (Access Token + X-Device-ID)
                ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ API GATEWAY (Port 3000) — Policy Enforcement Point (PEP)    │
+│  ├─ Policy Engine / Policy Administrator (PE/PA)            │
+│  │   (baca atribut DB: identitas, device, role, jam akses)  │
 │  ├─ Auth Controller (/auth/login, refresh, logout, service) │
-│  ├─ Policy Engine / PA (ABAC & Jam Akses 07.00–21.00 WIB)  │
-│  ├─ Audit Logger (Pencatatan ALLOW/DENY, Redaksi Token)     │
+│  ├─ Audit Logger (Pencatatan ALLOW/DENY ke tabel audit_logs)│
 │  └─ Anti-Spoofing Proxy (Strip client headers, sisipkan     │
 │     X-Gateway-Secret resmi)                                 │
-└──────────────┬──────────────────────────────┬───────────────┘
-               │                              │
-               │ + X-Gateway-Secret           │ + X-Gateway-Secret
-               │ + User Token                 │ + Service Token
-               ▼                              ▼
-┌───────────────────────────────┐ ┌───────────────────────────┐
-│ SERVICE NILAI (Port 3001)     │ │ SERVICE TRANSKRIP (3002)  │
-│  ├─ Verifikasi Secret & Token │ │  ├─ Verifikasi Secret &   │
-│  ├─ Defense-in-Depth Role     │ │     Token                 │
-│  ├─ Cek Kepemilikan & Final   │ │  ├─ Endpoint Sinkronisasi │
-│  └─ Client Service Token Sync ┼─┼─>│     HANYA Service Token│
-└──────────────┬────────────────┘ └───────────┬───────────────┘
-               │                              │
-               └──────────────┬───────────────┘
-                              ▼
-               ┌──────────────────────────────┐
-               │ Shared SQLite Database       │
-               │ (Prepared Statements WAL)    │
-               └──────────────────────────────┘
+└──────┬──────────────────────┬───────────────────────────────┘
+       │ jika allow           │ jika allow            ▲
+       │ + X-Gateway-Secret   │ + X-Gateway-Secret    : sinkron transkrip
+       │ + User Token         │ + Service Token       : + token service
+       ▼                      ▼                       : (POST /transkrip/sinkron)
+┌───────────────────────┐  ┌─────────────────────────┐│
+│ SERVICE NILAI (3001)  │  │ SERVICE TRANSKRIP (3002)││
+│  ├─ Verifikasi Secret │  │  ├─ Verifikasi Secret   ││
+│  │  dan User Token    │  │  │  dan Service Token   ││
+│  ├─ Kelola Nilai      │  │  ├─ Kelola Transkrip    ││
+│  └─ Finalisasi Nilai ─┼──┼──┼──────────────────────┼┘
+└──────────┬────────────┘  └───────────┬─────────────┘
+           │                           │
+           └─────────────┬─────────────┘
+                         ▼
+           ┌───────────────────────────┐
+           │ Shared Database (SQLite)  │
+           │ (Users, Classes, Grades,  │
+           │  Transcripts, Audit Logs) │
+           └───────────────────────────┘
 ```
 
 ### Hasil Audit Jalur Akses Tunggal:

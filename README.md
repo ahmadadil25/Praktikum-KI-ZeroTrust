@@ -15,31 +15,56 @@ Sistem ini menerapkan prinsip-prinsip inti Zero Trust Architecture sesuai standa
    - Endpoint sinkronisasi transkrip hanya dapat diakses menggunakan Service Token sah dari Service Nilai.
 3. **Assume Breach**: Durasi token dibuat singkat (Access Token: 10 menit, Service Token: 5 menit). Refresh token disimpan ter-hash (SHA-256) di database dan mendukung pencabutan instan (revocation via logout). Akses langsung ke service internal tanpa melalui Gateway ditolak. Gateway juga membersihkan header buatan client (anti-spoofing).
 
+```mermaid
+flowchart TD
+    Client["Client (Postman / curl)"] -->|"access token + X-Device-ID"| PEP["API Gateway (PEP)<br/>port 3000<br/>/auth/*, /nilai/*, /kelas/*, /transkrip/*"]
+
+    PE["Policy Engine / Policy Administrator<br/>(login, token, keputusan akses)"] <-->|"allow / deny"| PEP
+    PE -.->|"baca atribut"| DB[("Database")]
+
+    PEP -->|"catat keputusan"| Audit["Audit Log<br/>(tabel audit_logs)"]
+
+    PEP -->|"jika allow<br/>+ X-Gateway-Secret"| SN["Service Nilai<br/>port 3001<br/>verifikasi secret + token"]
+    PEP -->|"jika allow<br/>+ X-Gateway-Secret"| ST["Service Transkrip<br/>port 3002<br/>verifikasi secret + token"]
+
+    SN -.->|"sinkron transkrip<br/>+ token service"| PEP
+
+    SN --> DB
+    ST --> DB
 ```
-                      +-------------------+
-                      | Client            |
-                      | (Postman / curl)  |
-                      +---------+---------+
-                                | access token + X-Device-ID
-                                v
-+------------------+  allow/deny +--------------------------+
-| Policy Engine /  |<----------> | API Gateway (PEP)        | --------> [ Audit Log ]
-| Administrator    |             | Port 3000                |           (Database)
-| (PE/PA)          |             +-------------+------------+
-+--------+---------+                           |
-         |                                     | + X-Gateway-Secret
-         | baca atribut                        |
-         v                                     +--------------------+
-+------------------+                           |                    |
-| Shared Database  |<--------------+-----------+--------+           |
-| (SQLite)         |               |                    |           |
-+------------------+               v                    v           v
-                          +-----------------+  sinkron  +--------------------+
-                          | Service Nilai   |---------> | Service Transkrip  |
-                          | Port 3001       |  (via PEP)| Port 3002          |
-                          | (verifikasi     |           | (verifikasi        |
-                          |  secret+token)  |           |  secret+token)     |
-                          +-----------------+           +--------------------+
+
+```
+                                  +-------------------+
+                                  | Client            |
+                                  | (Postman / curl)  |
+                                  +---------+---------+
+                                            | access token + X-Device-ID
+                                            v
++-----------------------------+ allow/deny  +------------------------------------+
+| Policy Engine /             |<----------->| API Gateway (PEP) port 3000        |--------> [ Audit Log ]
+| Policy Administrator (PE/PA)|             | /auth/*, /nilai/*,                 |          (audit_logs)
+| (login, token, keputusan)   |             | /kelas/*, /transkrip/*             |
++--------------+--------------+             +---------+------------------+-------+
+               |                                      |                  ^
+               : baca atribut                         | jika allow       : sinkron transkrip
+               : (mahasiswa, dosen,                   | + secret         : + token service
+               :  perangkat, status)                  |                  : (POST /transkrip/sinkron)
+               v                                      v                  |
++-----------------------------+             +-----------------+          |
+| Shared Database             |<------------| Service Nilai   |----------+
+| (SQLite: database.sqlite)   |             | port 3001       |
+|                             |             | (verif secret   |
+|                             |             |  + token)       |
+|                             |             +-----------------+
+|                             |
+|                             |             +-----------------+
+|                             |<------------| Service Transkrip
+|                             |             | port 3002       |
+|                             |             | (verif secret   |
+|                             |             |  + token)       |
++-----------------------------+             +--------^--------+
+                                                     |
+                                                     + (jika allow + X-Gateway-Secret)
 ```
 
 ### Komponen Sistem
