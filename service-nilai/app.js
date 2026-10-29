@@ -92,7 +92,7 @@ app.get('/nilai/:id', (req, res) => {
   const gradeId = parseInt(req.params.id, 10);
   const user = req.user;
 
-  if (isNaN(gradeId)) {
+  if (isNaN(gradeId) || gradeId <= 0) {
     return res.status(400).json({
       error: 'Bad Request',
       reason: 'ID nilai harus berupa angka integer valid',
@@ -169,7 +169,7 @@ app.put('/nilai/:id', (req, res) => {
     });
   }
 
-  if (isNaN(gradeId)) {
+  if (isNaN(gradeId) || gradeId <= 0) {
     return res.status(400).json({
       error: 'Bad Request',
       reason: 'ID nilai harus berupa angka integer valid',
@@ -265,7 +265,7 @@ app.post('/kelas/:id/finalisasi', async (req, res) => {
     });
   }
 
-  if (isNaN(classId)) {
+  if (isNaN(classId) || classId <= 0) {
     return res.status(400).json({
       error: 'Bad Request',
       reason: 'ID kelas harus berupa angka integer valid',
@@ -311,9 +311,10 @@ app.post('/kelas/:id/finalisasi', async (req, res) => {
   // Pemanggilan Antar-Service sesuai Arsitektur Zero Trust:
   // 1. Dapatkan Token Service dari Gateway (POST /auth/service)
   // 2. Kirim data nilai final ke Service Transkrip melalui Gateway (POST /transkrip/sinkron)
+  const gatewayBaseUrl = String(config.gatewayUrl || 'http://localhost:3000').replace(/\/+$/, '');
   let syncResult = null;
   try {
-    const tokenRes = await fetch(`${config.gatewayUrl}/auth/service`, {
+    const tokenRes = await fetch(`${gatewayBaseUrl}/auth/service`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -330,7 +331,7 @@ app.post('/kelas/:id/finalisasi', async (req, res) => {
     const { access_token: serviceToken } = await tokenRes.json();
 
     // Kirim sinkronisasi ke Gateway (Gateway PEP memverifikasi token service & meneruskan ke Service Transkrip)
-    const syncRes = await fetch(`${config.gatewayUrl}/transkrip/sinkron`, {
+    const syncRes = await fetch(`${gatewayBaseUrl}/transkrip/sinkron`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${serviceToken}`,

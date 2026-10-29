@@ -21,7 +21,8 @@ const { checkAccessHours } = require('../shared/time');
 function evaluatePolicy(context) {
   const { user, method, path, params = {}, simulatedHour = null } = context;
   const db = getDb();
-  const normalizedPath = path.toLowerCase();
+  // Normalisasi path: lowercase dan hapus trailing slash (kecuali root '/')
+  const normalizedPath = (path.toLowerCase().replace(/\/+$/, '') || '/');
   const upperMethod = method.toUpperCase();
 
   // 1. Kebijakan untuk: GET /nilai (Daftar Nilai)

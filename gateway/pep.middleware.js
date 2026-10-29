@@ -69,6 +69,20 @@ function enforcePolicy(req, res, next) {
     }
 
     const userPayload = tokenVerification.payload;
+    if (!userPayload || !userPayload.sub) {
+      recordAuditLog({
+        subject: 'invalid-subject',
+        endpoint,
+        deviceId: deviceIdHeader,
+        hasil: AUDIT_RESULT.DENY,
+        alasan: 'Token tidak memiliki klaim subjek (sub) yang valid',
+      });
+      return res.status(401).json({
+        error: 'Invalid Token',
+        reason: 'Token tidak memiliki klaim identitas subjek valid',
+      });
+    }
+
     const subjectName = userPayload.username || userPayload.service || String(userPayload.sub);
 
     // 2. Verifikasi Device Binding untuk User Token
