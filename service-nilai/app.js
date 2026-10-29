@@ -119,7 +119,7 @@ app.get('/nilai/:id', (req, res) => {
   }
 
   if (user.role === ROLES.MAHASISWA) {
-    if (grade.mahasiswa_id !== user.sub) {
+    if (Number(grade.mahasiswa_id) !== Number(user.sub)) {
       return res.status(403).json({
         error: 'Forbidden',
         reason: 'Akses ditolak: Mahasiswa dilarang mengakses nilai milik mahasiswa lain',
@@ -133,7 +133,7 @@ app.get('/nilai/:id', (req, res) => {
   }
 
   if (user.role === ROLES.DOSEN) {
-    if (grade.dosen_id !== user.sub) {
+    if (Number(grade.dosen_id) !== Number(user.sub)) {
       return res.status(403).json({
         error: 'Forbidden',
         reason: 'Akses ditolak: Dosen bukan pengampu kelas untuk nilai ini',
@@ -208,7 +208,7 @@ app.put('/nilai/:id', (req, res) => {
     });
   }
 
-  if (existingGrade.dosen_id !== req.user.sub) {
+  if (Number(existingGrade.dosen_id) !== Number(req.user.sub)) {
     return res.status(403).json({
       error: 'Forbidden',
       reason: `Akses ditolak: Dosen bukan pengampu kelas untuk nilai ID ${gradeId}`,
@@ -280,7 +280,7 @@ app.post('/kelas/:id/finalisasi', async (req, res) => {
     });
   }
 
-  if (classRow.dosen_id !== req.user.sub) {
+  if (Number(classRow.dosen_id) !== Number(req.user.sub)) {
     return res.status(403).json({
       error: 'Forbidden',
       reason: `Akses ditolak: Dosen bukan pengampu kelas ID ${classId}`,

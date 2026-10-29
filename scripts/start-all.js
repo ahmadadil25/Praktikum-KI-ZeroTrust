@@ -15,7 +15,7 @@ console.log('=== Memulai Layanan Zero Trust Sistem Nilai ===');
 for (const s of services) {
   const child = spawn('node', [path.resolve(__dirname, '..', s.script)], {
     stdio: ['inherit', 'pipe', 'pipe'],
-    shell: true,
+    shell: false,
   });
 
   child.stdout.on('data', (data) => {

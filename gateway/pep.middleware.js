@@ -1,7 +1,7 @@
 const { verifyToken } = require('../shared/jwt');
 const { getDb } = require('../shared/db');
 const { recordAuditLog } = require('../shared/audit');
-const { AUDIT_RESULT, HEADERS, ROLES } = require('../shared/constants');
+const { AUDIT_RESULT, HEADERS } = require('../shared/constants');
 const { evaluatePolicy } = require('./policy');
 const config = require('../shared/config');
 
@@ -15,148 +15,159 @@ const config = require('../shared/config');
  * 5. Menolak request yang tidak memenuhi syarat keamanan.
  */
 function enforcePolicy(req, res, next) {
-  // Ambil full path (termasuk baseUrl Express jika di-mount pada sub-path)
-  const fullPath = req.originalUrl ? req.originalUrl.split('?')[0] : ((req.baseUrl || '') + req.path);
-  const endpoint = `${req.method.toUpperCase()} ${fullPath}`;
-  const authHeader = req.headers[HEADERS.AUTHORIZATION] || req.headers['authorization'];
-  const deviceIdHeader = req.headers[HEADERS.DEVICE_ID] || req.headers['x-device-id'] || null;
-  
-  // Keamanan Zero Trust: X-Simulated-Hour hanya diizinkan untuk pengujian otomatis (test/dev)
-  // Header ini diabaikan secara total jika pada lingkungan produksi untuk mencegah bypass jam akses
-  const isTestOrDev = process.env.NODE_ENV !== 'production' && config.env !== 'production';
-  const simulatedHourHeader = isTestOrDev ? (req.headers['x-simulated-hour'] || null) : null;
+  try {
+    // Ambil full path (termasuk baseUrl Express jika di-mount pada sub-path)
+    const fullPath = req.originalUrl ? req.originalUrl.split('?')[0] : ((req.baseUrl || '') + req.path);
+    const endpoint = `${req.method.toUpperCase()} ${fullPath}`;
+    const authHeader = req.headers[HEADERS.AUTHORIZATION] || req.headers['authorization'];
+    const deviceIdHeader = req.headers[HEADERS.DEVICE_ID] || req.headers['x-device-id'] || null;
+    
+    // Keamanan Zero Trust: X-Simulated-Hour hanya diizinkan untuk pengujian otomatis (test/dev)
+    // Header ini diabaikan secara total jika pada lingkungan produksi untuk mencegah bypass jam akses
+    const isTestOrDev = process.env.NODE_ENV !== 'production' && config.env !== 'production';
+    const rawSimHour = req.headers['x-simulated-hour'];
+    const simulatedHourHeader = isTestOrDev
+      ? (Array.isArray(rawSimHour) ? rawSimHour[0] : (rawSimHour || null))
+      : null;
 
-  // 1. Ekstraksi Token dari Header Authorization
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    recordAuditLog({
-      subject: 'anonymous',
-      endpoint,
-      deviceId: deviceIdHeader,
-      hasil: AUDIT_RESULT.DENY,
-      alasan: 'Header Authorization Bearer token wajib disertakan',
-    });
-    return res.status(401).json({
-      error: 'Unauthorized',
-      reason: 'Token autentikasi tidak ditemukan pada header Authorization: Bearer <token>',
-    });
-  }
-
-  const rawToken = authHeader.substring(7).trim();
-  const tokenVerification = verifyToken(rawToken);
-
-  if (!tokenVerification.valid) {
-    const isExpired = tokenVerification.expired;
-    const alasan = isExpired
-      ? 'Token telah kedaluwarsa'
-      : 'Token tidak valid atau tanda tangan digital rusak';
-
-    recordAuditLog({
-      subject: 'unverified-token',
-      endpoint,
-      deviceId: deviceIdHeader,
-      hasil: AUDIT_RESULT.DENY,
-      alasan,
-    });
-
-    return res.status(401).json({
-      error: isExpired ? 'Token Expired' : 'Invalid Token',
-      reason: alasan,
-    });
-  }
-
-  const userPayload = tokenVerification.payload;
-  const subjectName = userPayload.username || userPayload.service || String(userPayload.sub);
-
-  // 2. Verifikasi Device Binding untuk User Token
-  if (tokenVerification.type === 'user') {
-    if (!deviceIdHeader) {
+    // 1. Ekstraksi Token dari Header Authorization
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       recordAuditLog({
-        subject: subjectName,
-        endpoint,
-        deviceId: null,
-        hasil: AUDIT_RESULT.DENY,
-        alasan: 'Header X-Device-ID wajib disertakan untuk verifikasi identitas perangkat',
-      });
-      return res.status(400).json({
-        error: 'Bad Request',
-        reason: 'Header X-Device-ID wajib disertakan',
-      });
-    }
-
-    const db = getDb();
-    const registeredDevice = db.prepare(
-      'SELECT * FROM devices WHERE user_id = ? AND device_id = ?'
-    ).get(userPayload.sub, deviceIdHeader);
-
-    if (!registeredDevice) {
-      recordAuditLog({
-        subject: subjectName,
+        subject: 'anonymous',
         endpoint,
         deviceId: deviceIdHeader,
         hasil: AUDIT_RESULT.DENY,
-        alasan: `Perangkat ${deviceIdHeader} tidak terdaftar untuk pengguna ${subjectName}`,
+        alasan: 'Header Authorization Bearer token wajib disertakan',
       });
-      return res.status(403).json({
-        error: 'Forbidden Device',
-        reason: 'Perangkat tidak terdaftar untuk pengguna ini',
+      return res.status(401).json({
+        error: 'Unauthorized',
+        reason: 'Token autentikasi tidak ditemukan pada header Authorization: Bearer <token>',
       });
     }
 
-    if (registeredDevice.status !== 'active') {
+    const rawToken = authHeader.substring(7).trim();
+    const tokenVerification = verifyToken(rawToken);
+
+    if (!tokenVerification.valid) {
+      const isExpired = tokenVerification.expired;
+      const alasan = isExpired
+        ? 'Token telah kedaluwarsa'
+        : 'Token tidak valid atau tanda tangan digital rusak';
+
       recordAuditLog({
-        subject: subjectName,
+        subject: 'unverified-token',
         endpoint,
         deviceId: deviceIdHeader,
         hasil: AUDIT_RESULT.DENY,
-        alasan: `Perangkat ${deviceIdHeader} berstatus ${registeredDevice.status}`,
+        alasan,
       });
-      return res.status(403).json({
-        error: 'Inactive Device',
-        reason: `Perangkat berstatus ${registeredDevice.status}`,
+
+      return res.status(401).json({
+        error: isExpired ? 'Token Expired' : 'Invalid Token',
+        reason: alasan,
       });
     }
-  }
 
-  // 3. Evaluasi Kebijakan Akses (Policy Engine)
-  const policyDecision = evaluatePolicy({
-    user: userPayload,
-    method: req.method,
-    path: fullPath,
-    params: req.params,
-    body: req.body,
-    simulatedHour: simulatedHourHeader,
-  });
+    const userPayload = tokenVerification.payload;
+    const subjectName = userPayload.username || userPayload.service || String(userPayload.sub);
 
-  if (!policyDecision.allowed) {
+    // 2. Verifikasi Device Binding untuk User Token
+    if (tokenVerification.type === 'user') {
+      if (!deviceIdHeader) {
+        recordAuditLog({
+          subject: subjectName,
+          endpoint,
+          deviceId: null,
+          hasil: AUDIT_RESULT.DENY,
+          alasan: 'Header X-Device-ID wajib disertakan untuk verifikasi identitas perangkat',
+        });
+        return res.status(400).json({
+          error: 'Bad Request',
+          reason: 'Header X-Device-ID wajib disertakan',
+        });
+      }
+
+      const db = getDb();
+      const registeredDevice = db.prepare(
+        'SELECT * FROM devices WHERE user_id = ? AND device_id = ?'
+      ).get(userPayload.sub, deviceIdHeader);
+
+      if (!registeredDevice) {
+        recordAuditLog({
+          subject: subjectName,
+          endpoint,
+          deviceId: deviceIdHeader,
+          hasil: AUDIT_RESULT.DENY,
+          alasan: `Perangkat ${deviceIdHeader} tidak terdaftar untuk pengguna ${subjectName}`,
+        });
+        return res.status(403).json({
+          error: 'Forbidden Device',
+          reason: 'Perangkat tidak terdaftar untuk pengguna ini',
+        });
+      }
+
+      if (registeredDevice.status !== 'active') {
+        recordAuditLog({
+          subject: subjectName,
+          endpoint,
+          deviceId: deviceIdHeader,
+          hasil: AUDIT_RESULT.DENY,
+          alasan: `Perangkat ${deviceIdHeader} berstatus ${registeredDevice.status}`,
+        });
+        return res.status(403).json({
+          error: 'Inactive Device',
+          reason: `Perangkat berstatus ${registeredDevice.status}`,
+        });
+      }
+    }
+
+    // 3. Evaluasi Kebijakan Akses (Policy Engine)
+    const policyDecision = evaluatePolicy({
+      user: userPayload,
+      method: req.method,
+      path: fullPath,
+      params: req.params,
+      body: req.body,
+      simulatedHour: simulatedHourHeader,
+    });
+
+    if (!policyDecision.allowed) {
+      recordAuditLog({
+        subject: subjectName,
+        endpoint,
+        deviceId: deviceIdHeader || '-',
+        hasil: AUDIT_RESULT.DENY,
+        alasan: policyDecision.reason,
+      });
+
+      return res.status(policyDecision.statusCode).json({
+        error: 'Access Denied',
+        reason: policyDecision.reason,
+      });
+    }
+
+    // 4. Catat Audit Log Keputusan ALLOW
     recordAuditLog({
       subject: subjectName,
       endpoint,
       deviceId: deviceIdHeader || '-',
-      hasil: AUDIT_RESULT.DENY,
+      hasil: AUDIT_RESULT.ALLOW,
       alasan: policyDecision.reason,
     });
 
-    return res.status(policyDecision.statusCode).json({
-      error: 'Access Denied',
-      reason: policyDecision.reason,
+    // Lampirkan payload token dan token mentah ke request object
+    req.user = userPayload;
+    req.rawToken = rawToken;
+    req.tokenType = tokenVerification.type;
+
+    return next();
+  } catch (err) {
+    console.error('[PEP ERROR]', err.message);
+    return res.status(500).json({
+      error: 'Internal Server Error',
+      reason: 'Terjadi kesalahan pada Policy Enforcement Point (PEP)',
     });
   }
-
-  // 4. Catat Audit Log Keputusan ALLOW
-  recordAuditLog({
-    subject: subjectName,
-    endpoint,
-    deviceId: deviceIdHeader || '-',
-    hasil: AUDIT_RESULT.ALLOW,
-    alasan: policyDecision.reason,
-  });
-
-  // Lampirkan payload token dan token mentah ke request object
-  req.user = userPayload;
-  req.rawToken = rawToken;
-  req.tokenType = tokenVerification.type;
-
-  return next();
 }
 
 module.exports = {
