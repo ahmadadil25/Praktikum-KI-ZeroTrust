@@ -3,6 +3,17 @@ const { AUDIT_RESULT } = require('./constants');
 const { getWIBTimestamp } = require('./time');
 
 /**
+ * Filter sanitasi untuk memastikan tidak ada password, JWT, refresh token mentah,
+ * atau secret yang tersimpan di dalam audit log (Prinsip Zero Trust A.7).
+ */
+function sanitizeLog(text) {
+  if (!text) return '-';
+  return String(text)
+    .replace(/Bearer\s+[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*/gi, 'Bearer [REDACTED_JWT]')
+    .replace(/(password|secret|client_secret|refresh_token)\s*[:=]\s*["']?[^"',\s}]+/gi, '$1=[REDACTED]');
+}
+
+/**
  * Mencatat keputusan akses (Policy Decision) ke tabel audit_logs
  *
  * @param {Object} entry
@@ -16,11 +27,11 @@ function recordAuditLog({ subject, endpoint, deviceId = null, hasil, alasan }) {
   try {
     const db = getDb();
     const waktu = getWIBTimestamp();
-    const cleanSubject = String(subject || 'anonymous');
-    const cleanEndpoint = String(endpoint || '-');
-    const cleanDeviceId = deviceId ? String(deviceId) : '-';
+    const cleanSubject = sanitizeLog(subject || 'anonymous');
+    const cleanEndpoint = sanitizeLog(endpoint || '-');
+    const cleanDeviceId = deviceId ? sanitizeLog(deviceId) : '-';
     const cleanHasil = hasil === AUDIT_RESULT.ALLOW ? AUDIT_RESULT.ALLOW : AUDIT_RESULT.DENY;
-    const cleanAlasan = String(alasan || '-');
+    const cleanAlasan = sanitizeLog(alasan || '-');
 
     const stmt = db.prepare(`
       INSERT INTO audit_logs (waktu, subject, endpoint, device_id, hasil, alasan)
@@ -39,4 +50,5 @@ function recordAuditLog({ subject, endpoint, deviceId = null, hasil, alasan }) {
 
 module.exports = {
   recordAuditLog,
+  sanitizeLog,
 };

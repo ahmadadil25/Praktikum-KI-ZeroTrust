@@ -53,9 +53,18 @@ app.get('/', (req, res) => {
     version: '1.0.0',
     endpoints: {
       auth: ['POST /auth/login', 'POST /auth/refresh', 'POST /auth/logout', 'POST /auth/service'],
-      nilai: ['GET /nilai', 'PUT /nilai/:id', 'POST /kelas/:id/finalisasi'],
+      nilai: ['GET /nilai', 'GET /nilai/:id', 'PUT /nilai/:id', 'POST /kelas/:id/finalisasi'],
       transkrip: ['GET /transkrip/:nim', 'POST /transkrip/sinkron'],
     },
+  });
+});
+
+// 4. Centralized Error Handler (tanpa membocorkan stack trace ke client)
+app.use((err, req, res, next) => {
+  console.error('[GATEWAY ERROR]', err.message);
+  res.status(err.status || 500).json({
+    error: 'Internal Server Error',
+    reason: 'Terjadi kesalahan internal pada API Gateway',
   });
 });
 

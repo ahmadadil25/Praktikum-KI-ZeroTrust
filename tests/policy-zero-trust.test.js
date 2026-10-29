@@ -8,6 +8,7 @@ const nilaiApp = require('../service-nilai/app');
 const transkripApp = require('../service-transkrip/app');
 const { getDb, closeDb } = require('../shared/db');
 const { runSeed } = require('../database/seed');
+const { resetDatabase } = require('../database/reset');
 const config = require('../shared/config');
 const { ROLES, HEADERS } = require('../shared/constants');
 
@@ -25,8 +26,8 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
   let tokenService;
 
   before(async () => {
+    resetDatabase();
     db = getDb();
-    runSeed(db);
 
     // Jalankan server internal Service Nilai dan Service Transkrip untuk pengujian proxy gateway
     await new Promise((resolve) => {
@@ -92,7 +93,7 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
   });
 
   describe('1. Verifikasi Device & Token di Gateway PEP', () => {
-    it('Request dengan device tidak terdaftar ditolak oleh PEP', async () => {
+    it('Request dengan device tidak terdaftar ditolak oleh PEP (403)', async () => {
       const res = await request(gatewayApp)
         .get('/nilai')
         .set('Authorization', `Bearer ${tokenMhsAhmad}`)
@@ -103,7 +104,7 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
       assert.ok(res.body.reason.includes('tidak terdaftar'));
     });
 
-    it('Request tanpa header X-Device-ID ditolak oleh PEP', async () => {
+    it('Request tanpa header X-Device-ID ditolak oleh PEP (400)', async () => {
       const res = await request(gatewayApp)
         .get('/nilai')
         .set('Authorization', `Bearer ${tokenMhsAhmad}`);
@@ -113,12 +114,11 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
       assert.ok(res.body.reason.includes('X-Device-ID'));
     });
 
-    it('Request dengan token kedaluwarsa ditolak oleh PEP', async () => {
-      // Buat token kedaluwarsa secara sengaja (-10 detik)
+    it('Request dengan token kedaluwarsa ditolak oleh PEP (401)', async () => {
       const expiredToken = jwt.sign(
         { sub: 4, username: 'mhs_ahmad', role: ROLES.MAHASISWA, nim: '220101' },
         config.jwt.accessSecret,
-        { expiresIn: -10 }
+        { expiresIn: -10, issuer: 'zero-trust-gateway' }
       );
 
       const res = await request(gatewayApp)
@@ -131,7 +131,7 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
       assert.ok(res.body.reason.includes('kedaluwarsa'));
     });
 
-    it('Request tanpa header Authorization ditolak oleh PEP', async () => {
+    it('Request tanpa header Authorization ditolak oleh PEP (401)', async () => {
       const res = await request(gatewayApp)
         .get('/nilai')
         .set('x-device-id', deviceMhsAhmad);
@@ -141,7 +141,44 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
     });
   });
 
-  describe('2. Kontrol Kepemilikan Data: Mahasiswa & Transkrip', () => {
+  describe('2. Kontrol Kepemilikan Data: Mahasiswa (Nilai & Transkrip)', () => {
+    it('G.1: Mahasiswa hanya melihat nilai miliknya pada GET /nilai', async () => {
+      const res = await request(gatewayApp)
+        .get('/nilai')
+        .set('Authorization', `Bearer ${tokenMhsAhmad}`)
+        .set('x-device-id', deviceMhsAhmad);
+
+      assert.equal(res.status, 200);
+      assert.equal(res.body.status, 'success');
+      assert.equal(res.body.user_id, 4); // Ahmad ID
+      // Ahmad hanya terdaftar di IF-301 dan IF-302
+      assert.equal(res.body.data.length, 2);
+    });
+
+    it('G.2: Mahasiswa diizinkan melihat detail nilai miliknya sendiri pada GET /nilai/:id', async () => {
+      // Nilai ID 1 adalah milik mhs_ahmad (IF-301)
+      const res = await request(gatewayApp)
+        .get('/nilai/1')
+        .set('Authorization', `Bearer ${tokenMhsAhmad}`)
+        .set('x-device-id', deviceMhsAhmad);
+
+      assert.equal(res.status, 200);
+      assert.equal(res.body.status, 'success');
+      assert.equal(res.body.data.mahasiswa_id, 4);
+    });
+
+    it('G.2: Mahasiswa DITOLAK ketika mengakses nilai mahasiswa lain pada GET /nilai/:id (403)', async () => {
+      // Nilai ID 2 adalah milik mhs_bambang (IF-301)
+      const res = await request(gatewayApp)
+        .get('/nilai/2')
+        .set('Authorization', `Bearer ${tokenMhsAhmad}`)
+        .set('x-device-id', deviceMhsAhmad);
+
+      assert.equal(res.status, 403);
+      assert.equal(res.body.error, 'Access Denied');
+      assert.ok(res.body.reason.includes('dilarang mengakses nilai milik mahasiswa lain'));
+    });
+
     it('Mahasiswa Ahmad (NIM: 220101) diizinkan melihat transkrip miliknya sendiri', async () => {
       const res = await request(gatewayApp)
         .get('/transkrip/220101')
@@ -153,7 +190,7 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
       assert.equal(res.body.mahasiswa.nim, '220101');
     });
 
-    it('Mahasiswa Ahmad (NIM: 220101) DITOLAK saat mencoba melihat transkrip Bambang (NIM: 220102)', async () => {
+    it('G.2: Mahasiswa Ahmad DITOLAK saat mencoba melihat transkrip Bambang (NIM: 220102) (403)', async () => {
       const res = await request(gatewayApp)
         .get('/transkrip/220102')
         .set('Authorization', `Bearer ${tokenMhsAhmad}`)
@@ -164,7 +201,7 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
       assert.ok(res.body.reason.includes('dilarang melihat transkrip milik mahasiswa lain'));
     });
 
-    it('Admin diizinkan melihat transkrip mahasiswa mana pun', async () => {
+    it('G.11: Admin diizinkan melihat transkrip mahasiswa mana pun', async () => {
       const res = await request(gatewayApp)
         .get('/transkrip/220101')
         .set('Authorization', `Bearer ${tokenAdmin}`)
@@ -177,7 +214,22 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
   });
 
   describe('3. Kontrol Kepemilikan Data: Dosen & Kelas Pengampu', () => {
-    it('Dosen Budi (pengampu IF-301) DITOLAK saat mencoba mengubah nilai kelas IF-302 (diampu Dosen Siti)', async () => {
+    it('G.3: Dosen hanya dapat melihat nilai pada kelas yang diampunya (GET /nilai)', async () => {
+      const res = await request(gatewayApp)
+        .get('/nilai')
+        .set('Authorization', `Bearer ${tokenDosenBudi}`)
+        .set('x-device-id', deviceDosenBudi);
+
+      assert.equal(res.status, 200);
+      assert.equal(res.body.dosen_id, 2); // Budi ID
+      // Budi hanya mengampu IF-301 (2 mahasiswa: Ahmad dan Bambang)
+      assert.equal(res.body.data.length, 2);
+      res.body.data.forEach((g) => {
+        assert.equal(g.kode_kelas, 'IF-301');
+      });
+    });
+
+    it('G.3: Dosen Budi (pengampu IF-301) DITOLAK saat mencoba mengubah nilai kelas IF-302 (diampu Dosen Siti)', async () => {
       // Nilai ID 4 adalah milik mhs_citra di kelas IF-302 (Dosen Siti)
       const res = await request(gatewayApp)
         .put('/nilai/4')
@@ -207,7 +259,7 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
       assert.ok(res.body.reason.includes('bukan pengampu'));
     });
 
-    it('Mahasiswa DITOLAK saat mencoba mengubah nilai', async () => {
+    it('Mahasiswa DITOLAK saat mencoba mengubah nilai (403)', async () => {
       const res = await request(gatewayApp)
         .put('/nilai/1')
         .set('Authorization', `Bearer ${tokenMhsAhmad}`)
@@ -222,8 +274,7 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
   });
 
   describe('4. Jam Akses Operasional (07.00 - 21.00 Asia/Jakarta)', () => {
-    it('Perubahan nilai DITOLAK di luar jam akses operasional (simulasi jam 22.00 malam)', async () => {
-      // Nilai ID 1 adalah milik mhs_ahmad di IF-301 (diampu Dosen Budi, nilai awal 88.0)
+    it('G.5: Perubahan nilai DITOLAK di luar jam akses operasional (simulasi jam 22.00 malam)', async () => {
       const initialGrade = db.prepare('SELECT nilai FROM grades WHERE id = 1').get().nilai;
 
       const res = await request(gatewayApp)
@@ -242,15 +293,15 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
       assert.equal(currentGrade, initialGrade, 'Nilai tidak boleh berubah jika ditolak karena jam akses!');
     });
 
-    it('Perubahan nilai DITOLAK di luar jam akses operasional (simulasi jam 04.00 subuh)', async () => {
+    it('G.5: Finalisasi kelas DITOLAK di luar jam akses operasional (simulasi jam 23.00 malam)', async () => {
       const res = await request(gatewayApp)
-        .put('/nilai/1')
+        .post('/kelas/1/finalisasi')
         .set('Authorization', `Bearer ${tokenDosenBudi}`)
         .set('x-device-id', deviceDosenBudi)
-        .set('x-simulated-hour', '4')
-        .send({ nilai: 99.0 });
+        .set('x-simulated-hour', '23');
 
       assert.equal(res.status, 403);
+      assert.equal(res.body.error, 'Access Denied');
       assert.ok(res.body.reason.includes('jam akses'));
     });
 
@@ -273,7 +324,7 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
   });
 
   describe('5. Immutabilitas Nilai yang Sudah Berstatus FINAL', () => {
-    it('Dosen Siti DITOLAK saat mencoba mengubah nilai yang sudah berstatus final (Grade ID: 3)', async () => {
+    it('G.4: Dosen Siti DITOLAK saat mencoba mengubah nilai yang sudah berstatus final (Grade ID: 3)', async () => {
       // Grade ID: 3 di IF-302 memiliki status_final = 1
       const res = await request(gatewayApp)
         .put('/nilai/3')
@@ -293,7 +344,7 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
   });
 
   describe('6. Proteksi Akses Langsung ke Service (Tanpa Gateway / X-Gateway-Secret)', () => {
-    it('Akses langsung ke Service Nilai tanpa X-Gateway-Secret DITOLAK (403)', async () => {
+    it('G.9: Akses langsung ke Service Nilai tanpa X-Gateway-Secret DITOLAK (403)', async () => {
       const res = await request(nilaiApp)
         .get('/nilai')
         .set('Authorization', `Bearer ${tokenDosenBudi}`);
@@ -302,7 +353,7 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
       assert.equal(res.body.error, 'Direct Access Forbidden');
     });
 
-    it('Akses ke Service Nilai dengan X-Gateway-Secret BENAR tetapi TANPA TOKEN DITOLAK (401)', async () => {
+    it('G.10: Akses ke Service Nilai dengan X-Gateway-Secret BENAR tetapi TANPA TOKEN DITOLAK (401)', async () => {
       const res = await request(nilaiApp)
         .get('/nilai')
         .set('x-gateway-secret', config.gatewaySecret);
@@ -311,7 +362,7 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
       assert.equal(res.body.error, 'Unauthorized');
     });
 
-    it('Akses langsung ke Service Transkrip tanpa X-Gateway-Secret DITOLAK (403)', async () => {
+    it('G.9: Akses langsung ke Service Transkrip tanpa X-Gateway-Secret DITOLAK (403)', async () => {
       const res = await request(transkripApp)
         .get('/transkrip/220101')
         .set('Authorization', `Bearer ${tokenAdmin}`);
@@ -321,8 +372,8 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
     });
   });
 
-  describe('7. Proteksi Khusus POST /transkrip/sinkron (Hanya Token Service)', () => {
-    it('Token Mahasiswa DITOLAK untuk sinkronisasi transkrip (403)', async () => {
+  describe('7. Proteksi Khusus POST /transkrip/sinkron & Validasi Token Service', () => {
+    it('G.7: Token Mahasiswa DITOLAK untuk sinkronisasi transkrip (403)', async () => {
       const res = await request(gatewayApp)
         .post('/transkrip/sinkron')
         .set('Authorization', `Bearer ${tokenMhsAhmad}`)
@@ -333,7 +384,7 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
       assert.ok(res.body.reason.includes('hanya dapat diakses menggunakan token service'));
     });
 
-    it('Token Dosen DITOLAK untuk sinkronisasi transkrip (403)', async () => {
+    it('G.7: Token Dosen DITOLAK untuk sinkronisasi transkrip (403)', async () => {
       const res = await request(gatewayApp)
         .post('/transkrip/sinkron')
         .set('Authorization', `Bearer ${tokenDosenBudi}`)
@@ -344,7 +395,7 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
       assert.ok(res.body.reason.includes('hanya dapat diakses menggunakan token service'));
     });
 
-    it('Token Admin DITOLAK untuk sinkronisasi transkrip (403)', async () => {
+    it('G.7 & G.11: Token Admin DITOLAK untuk sinkronisasi transkrip (403)', async () => {
       const res = await request(gatewayApp)
         .post('/transkrip/sinkron')
         .set('Authorization', `Bearer ${tokenAdmin}`)
@@ -355,7 +406,39 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
       assert.ok(res.body.reason.includes('hanya dapat diakses menggunakan token service'));
     });
 
-    it('Token Service Nilai DIIZINKAN untuk sinkronisasi transkrip', async () => {
+    it('G.8: Sinkronisasi DITOLAK jika token service kedaluwarsa (401)', async () => {
+      const expiredServiceToken = jwt.sign(
+        { sub: 'service-nilai', role: ROLES.SERVICE, service: 'service-nilai' },
+        config.jwt.serviceSecret,
+        { expiresIn: -10, issuer: 'zero-trust-gateway' }
+      );
+
+      const res = await request(gatewayApp)
+        .post('/transkrip/sinkron')
+        .set('Authorization', `Bearer ${expiredServiceToken}`)
+        .send({ kelas_id: 1 });
+
+      assert.equal(res.status, 401);
+      assert.equal(res.body.error, 'Token Expired');
+    });
+
+    it('G.8: Sinkronisasi DITOLAK jika token service tidak valid / palsu (401)', async () => {
+      const forgedToken = jwt.sign(
+        { sub: 'service-nilai', role: ROLES.SERVICE },
+        'wrong-secret-key-signature',
+        { expiresIn: '5m', issuer: 'zero-trust-gateway' }
+      );
+
+      const res = await request(gatewayApp)
+        .post('/transkrip/sinkron')
+        .set('Authorization', `Bearer ${forgedToken}`)
+        .send({ kelas_id: 1 });
+
+      assert.equal(res.status, 401);
+      assert.equal(res.body.error, 'Invalid Token');
+    });
+
+    it('Token Service Nilai sah DIIZINKAN untuk sinkronisasi transkrip (200)', async () => {
       const res = await request(gatewayApp)
         .post('/transkrip/sinkron')
         .set('Authorization', `Bearer ${tokenService}`)
@@ -376,19 +459,63 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
       assert.equal(res.status, 200);
       assert.equal(res.body.status, 'success');
       assert.equal(res.body.synced_count, 1);
+    });
 
-      // Verifikasi data masuk ke tabel transcripts
-      const transcript = db.prepare(`
-        SELECT * FROM transcripts WHERE mahasiswa_id = 4 AND kelas_id = 1
-      `).get();
-      assert.ok(transcript, 'Transkrip harus tersimpan di database');
-      assert.equal(transcript.nilai_angka, 89.5);
-      assert.equal(transcript.nilai_huruf, 'A');
+    it('G.13: Pengulangan sinkronisasi (Idempotency) tidak membuat duplikasi data di tabel transkrip', async () => {
+      // Hitung jumlah awal
+      const countBefore = db.prepare('SELECT count(*) as c FROM transcripts').get().c;
+
+      // Kirim sinkronisasi ulang dengan data yang sama
+      const resRetry = await request(gatewayApp)
+        .post('/transkrip/sinkron')
+        .set('Authorization', `Bearer ${tokenService}`)
+        .send({
+          kelas_id: 1,
+          items: [
+            {
+              mahasiswa_id: 4,
+              kelas_id: 1,
+              kode_kelas: 'IF-301',
+              mata_kuliah: 'Keamanan Informasi',
+              sks: 3,
+              nilai: 89.5,
+            },
+          ],
+        });
+
+      assert.equal(resRetry.status, 200);
+
+      const countAfter = db.prepare('SELECT count(*) as c FROM transcripts').get().c;
+      assert.equal(countAfter, countBefore, 'Jumlah transkrip tidak boleh bertambah saat sinkronisasi diulang!');
     });
   });
 
-  describe('8. Verifikasi Audit Log', () => {
-    it('Audit log mencatat keputusan ALLOW dan DENY dengan detail lengkap', () => {
+  describe('8. Penanganan Kegagalan Sinkronisasi (Fault Handling)', () => {
+    it('G.14: Kegagalan sinkronisasi transkrip ditangani dan tidak memberi respon sukses palsu (502)', async () => {
+      // Tutup sementara Service Transkrip untuk mensimulasikan kegagalan sinkronisasi
+      await new Promise((resolve) => transkripServer.close(resolve));
+
+      // Dosen mencoba memfinalisasi kelas saat downstream transkrip tidak dapat dihubungi
+      const res = await request(gatewayApp)
+        .post('/kelas/1/finalisasi')
+        .set('Authorization', `Bearer ${tokenDosenBudi}`)
+        .set('x-device-id', deviceDosenBudi)
+        .set('x-simulated-hour', '10');
+
+      assert.equal(res.status, 502);
+      assert.equal(res.body.status, 'error');
+      assert.equal(res.body.error, 'Synchronization Failed');
+      assert.ok(res.body.message.includes('sinkronisasi transkrip melalui gateway gagal'));
+
+      // Nyalakan kembali server transkrip untuk pengujian berikutnya
+      await new Promise((resolve) => {
+        transkripServer = transkripApp.listen(config.portTranskrip, resolve);
+      });
+    });
+  });
+
+  describe('9. Verifikasi Audit Log & Proteksi Secret Log', () => {
+    it('G.12: Audit log mencatat keputusan ALLOW dan DENY dengan detail lengkap', () => {
       const logs = db.prepare('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 50').all();
       assert.ok(logs.length > 0, 'Audit logs tidak boleh kosong');
 
@@ -405,6 +532,10 @@ describe('Tahap 3 & 4: Zero Trust Policy Engine, PEP, & Service Security', () =>
         assert.ok(log.device_id !== undefined, 'Log harus memiliki device_id');
         assert.ok(['ALLOW', 'DENY'].includes(log.hasil), 'Hasil harus ALLOW atau DENY');
         assert.ok(log.alasan, 'Log harus memiliki alasan');
+
+        // Pastikan tidak ada token mentah atau password yang bocor di log
+        assert.equal(log.alasan.includes('Bearer eyJ'), false, 'Tidak boleh ada raw JWT di alasan log');
+        assert.equal(log.subject.includes('eyJ'), false, 'Tidak boleh ada raw JWT di subject log');
       });
     });
   });

@@ -56,3 +56,4 @@ function verifyResourceSecurity(req, res, next) {
 module.exports = {
   verifyResourceSecurity,
 };
+

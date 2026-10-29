@@ -77,6 +77,75 @@ app.get('/nilai', (req, res) => {
 });
 
 /**
+ * GET /nilai/:id
+ * Mahasiswa hanya melihat detail nilainya sendiri; Dosen hanya melihat detail nilai kelasnya
+ */
+app.get('/nilai/:id', (req, res) => {
+  const db = getDb();
+  const gradeId = parseInt(req.params.id, 10);
+  const user = req.user;
+
+  if (isNaN(gradeId)) {
+    return res.status(400).json({
+      error: 'Bad Request',
+      reason: 'ID nilai harus berupa angka integer valid',
+    });
+  }
+
+  const grade = db.prepare(`
+    SELECT g.id, g.nilai, g.status_final, g.updated_at, g.mahasiswa_id,
+           c.id as kelas_id, c.kode_kelas, c.nama_kelas, c.mata_kuliah, c.sks, c.dosen_id,
+           d.nama as dosen_pengampu,
+           m.nim as mahasiswa_nim, m.nama as mahasiswa_nama
+    FROM grades g
+    JOIN classes c ON g.kelas_id = c.id
+    JOIN users d ON c.dosen_id = d.id
+    JOIN users m ON g.mahasiswa_id = m.id
+    WHERE g.id = ?
+  `).get(gradeId);
+
+  if (!grade) {
+    return res.status(404).json({
+      error: 'Not Found',
+      reason: `Nilai ID ${gradeId} tidak ditemukan`,
+    });
+  }
+
+  if (user.role === ROLES.MAHASISWA) {
+    if (grade.mahasiswa_id !== user.sub) {
+      return res.status(403).json({
+        error: 'Forbidden',
+        reason: 'Akses ditolak: Mahasiswa dilarang mengakses nilai milik mahasiswa lain',
+      });
+    }
+
+    return res.status(200).json({
+      status: 'success',
+      data: grade,
+    });
+  }
+
+  if (user.role === ROLES.DOSEN) {
+    if (grade.dosen_id !== user.sub) {
+      return res.status(403).json({
+        error: 'Forbidden',
+        reason: 'Akses ditolak: Dosen bukan pengampu kelas untuk nilai ini',
+      });
+    }
+
+    return res.status(200).json({
+      status: 'success',
+      data: grade,
+    });
+  }
+
+  return res.status(403).json({
+    error: 'Forbidden',
+    reason: 'Role tidak memiliki izin mengakses data nilai',
+  });
+});
+
+/**
  * PUT /nilai/:id
  * Dosen mengubah nilai pada kelas yang diampu (belum final)
  */
@@ -85,18 +154,38 @@ app.put('/nilai/:id', (req, res) => {
   const gradeId = parseInt(req.params.id, 10);
   const { nilai } = req.body || {};
 
-  if (nilai === undefined || nilai === null || isNaN(nilai) || nilai < 0 || nilai > 100) {
+  if (isNaN(gradeId)) {
     return res.status(400).json({
       error: 'Bad Request',
-      reason: 'Nilai harus berupa angka antara 0 dan 100',
+      reason: 'ID nilai harus berupa angka integer valid',
     });
   }
 
-  const existingGrade = db.prepare('SELECT * FROM grades WHERE id = ?').get(gradeId);
+  if (nilai === undefined || nilai === null || isNaN(nilai) || Number(nilai) < 0 || Number(nilai) > 100) {
+    return res.status(400).json({
+      error: 'Bad Request',
+      reason: 'Nilai harus berupa angka valid antara 0 dan 100',
+    });
+  }
+
+  const existingGrade = db.prepare(`
+    SELECT g.*, c.dosen_id
+    FROM grades g
+    JOIN classes c ON g.kelas_id = c.id
+    WHERE g.id = ?
+  `).get(gradeId);
+
   if (!existingGrade) {
     return res.status(404).json({
       error: 'Not Found',
       reason: `Nilai ID ${gradeId} tidak ditemukan`,
+    });
+  }
+
+  if (existingGrade.dosen_id !== req.user.sub) {
+    return res.status(403).json({
+      error: 'Forbidden',
+      reason: `Akses ditolak: Dosen bukan pengampu kelas untuk nilai ID ${gradeId}`,
     });
   }
 
@@ -107,19 +196,24 @@ app.put('/nilai/:id', (req, res) => {
     });
   }
 
-  db.prepare(`
-    UPDATE grades
-    SET nilai = ?, updated_at = datetime('now', 'localtime')
-    WHERE id = ?
-  `).run(Number(nilai), gradeId);
+  // Eksekusi pembaruan dalam transaksi database
+  const updateTx = db.transaction(() => {
+    db.prepare(`
+      UPDATE grades
+      SET nilai = ?, updated_at = datetime('now', 'localtime')
+      WHERE id = ?
+    `).run(Number(nilai), gradeId);
 
-  const updated = db.prepare(`
-    SELECT g.*, c.kode_kelas, c.mata_kuliah, m.nim, m.nama as mahasiswa_nama
-    FROM grades g
-    JOIN classes c ON g.kelas_id = c.id
-    JOIN users m ON g.mahasiswa_id = m.id
-    WHERE g.id = ?
-  `).get(gradeId);
+    return db.prepare(`
+      SELECT g.*, c.kode_kelas, c.mata_kuliah, m.nim, m.nama as mahasiswa_nama
+      FROM grades g
+      JOIN classes c ON g.kelas_id = c.id
+      JOIN users m ON g.mahasiswa_id = m.id
+      WHERE g.id = ?
+    `).get(gradeId);
+  });
+
+  const updated = updateTx();
 
   return res.status(200).json({
     status: 'success',
@@ -131,10 +225,18 @@ app.put('/nilai/:id', (req, res) => {
 /**
  * POST /kelas/:id/finalisasi
  * Dosen memfinalisasi seluruh nilai pada kelas, lalu memanggil sinkronisasi transkrip via Gateway
+ * Menyediakan mekanisme percobaan ulang (retry) yang aman.
  */
 app.post('/kelas/:id/finalisasi', async (req, res) => {
   const db = getDb();
   const classId = parseInt(req.params.id, 10);
+
+  if (isNaN(classId)) {
+    return res.status(400).json({
+      error: 'Bad Request',
+      reason: 'ID kelas harus berupa angka integer valid',
+    });
+  }
 
   const classRow = db.prepare('SELECT * FROM classes WHERE id = ?').get(classId);
   if (!classRow) {
@@ -144,7 +246,14 @@ app.post('/kelas/:id/finalisasi', async (req, res) => {
     });
   }
 
-  // Finalisasi seluruh nilai di kelas ini dalam transaksi
+  if (classRow.dosen_id !== req.user.sub) {
+    return res.status(403).json({
+      error: 'Forbidden',
+      reason: `Akses ditolak: Dosen bukan pengampu kelas ID ${classId}`,
+    });
+  }
+
+  // Finalisasi seluruh nilai di kelas ini dalam transaksi (idempotent untuk retry)
   const finalizeTx = db.transaction(() => {
     db.prepare(`
       UPDATE grades
@@ -181,12 +290,12 @@ app.post('/kelas/:id/finalisasi', async (req, res) => {
 
     if (!tokenRes.ok) {
       const errBody = await tokenRes.json().catch(() => ({}));
-      throw new Error(`Gagal memperoleh service token: ${errBody.reason || tokenRes.statusText}`);
+      throw new Error(`Gagal memperoleh service token dari Gateway (${tokenRes.status}): ${errBody.reason || tokenRes.statusText}`);
     }
 
     const { access_token: serviceToken } = await tokenRes.json();
 
-    // Kirim sinkronisasi ke Gateway (Gateway PEP akan memverifikasi token service & meneruskan ke Service Transkrip)
+    // Kirim sinkronisasi ke Gateway (Gateway PEP memverifikasi token service & meneruskan ke Service Transkrip)
     const syncRes = await fetch(`${config.gatewayUrl}/transkrip/sinkron`, {
       method: 'POST',
       headers: {
@@ -199,20 +308,37 @@ app.post('/kelas/:id/finalisasi', async (req, res) => {
       }),
     });
 
+    if (!syncRes.ok) {
+      const errJson = await syncRes.json().catch(() => ({}));
+      throw new Error(`Sinkronisasi transkrip ditolak oleh gateway (${syncRes.status}): ${errJson.reason || syncRes.statusText}`);
+    }
+
     syncResult = await syncRes.json();
   } catch (syncError) {
     console.error('[SERVICE NILAI ERROR] Gagal melakukan sinkronisasi transkrip via Gateway:', syncError.message);
-    syncResult = {
-      status: 'partial_success',
-      warning: `Nilai berhasil difinalisasi secara lokal, namun sinkronisasi otomatis ke Gateway gagal: ${syncError.message}`,
-    };
+    // Sesuai Spesifikasi C.8: Jangan laporkan berhasil jika database transkrip belum terupdate!
+    return res.status(502).json({
+      status: 'error',
+      error: 'Synchronization Failed',
+      message: `Nilai berhasil difinalisasi secara lokal, namun sinkronisasi transkrip melalui gateway gagal: ${syncError.message}. Silakan lakukan percobaan ulang finalisasi.`,
+      kelas_id: classId,
+    });
   }
 
   return res.status(200).json({
     status: 'success',
-    message: `Kelas ${classRow.nama_kelas} (${classRow.kode_kelas}) berhasil difinalisasi`,
+    message: `Kelas ${classRow.nama_kelas} (${classRow.kode_kelas}) berhasil difinalisasi dan disinkronkan ke transkrip`,
     finalized_count: finalizedGrades.length,
     sync_result: syncResult,
+  });
+});
+
+// Penanganan error terpusat tanpa membocorkan stack trace ke client
+app.use((err, req, res, next) => {
+  console.error('[SERVICE NILAI ERROR]', err.message);
+  res.status(err.status || 500).json({
+    error: 'Internal Server Error',
+    reason: 'Terjadi kesalahan pada Service Nilai',
   });
 });
 

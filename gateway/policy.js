@@ -1,5 +1,5 @@
 const { getDb } = require('../shared/db');
-const { ROLES, AUDIT_RESULT } = require('../shared/constants');
+const { ROLES } = require('../shared/constants');
 const { checkAccessHours } = require('../shared/time');
 
 /**
@@ -24,7 +24,7 @@ function evaluatePolicy(context) {
   const normalizedPath = path.toLowerCase();
   const upperMethod = method.toUpperCase();
 
-  // 1. Kebijakan untuk: GET /nilai
+  // 1. Kebijakan untuk: GET /nilai (Daftar Nilai)
   if (upperMethod === 'GET' && (normalizedPath === '/nilai' || normalizedPath === '/nilai/')) {
     if (user.role === ROLES.MAHASISWA) {
       return {
@@ -49,7 +49,64 @@ function evaluatePolicy(context) {
     };
   }
 
-  // 2. Kebijakan untuk: PUT /nilai/:id
+  // 2. Kebijakan untuk: GET /nilai/:id (Detail Nilai Tunggal)
+  const getNilaiMatch = normalizedPath.match(/^\/nilai\/(\d+)$/);
+  if (upperMethod === 'GET' && getNilaiMatch) {
+    const gradeId = parseInt(params.id || getNilaiMatch[1], 10);
+
+    const grade = db.prepare(`
+      SELECT g.*, c.dosen_id
+      FROM grades g
+      JOIN classes c ON g.kelas_id = c.id
+      WHERE g.id = ?
+    `).get(gradeId);
+
+    if (!grade) {
+      return {
+        allowed: false,
+        statusCode: 404,
+        reason: `Data nilai dengan ID ${gradeId} tidak ditemukan`,
+      };
+    }
+
+    if (user.role === ROLES.MAHASISWA) {
+      if (grade.mahasiswa_id === user.sub) {
+        return {
+          allowed: true,
+          statusCode: 200,
+          reason: 'Mahasiswa diizinkan melihat detail nilai miliknya sendiri',
+        };
+      }
+      return {
+        allowed: false,
+        statusCode: 403,
+        reason: `Akses ditolak: Mahasiswa dilarang mengakses nilai milik mahasiswa lain`,
+      };
+    }
+
+    if (user.role === ROLES.DOSEN) {
+      if (grade.dosen_id === user.sub) {
+        return {
+          allowed: true,
+          statusCode: 200,
+          reason: 'Dosen diizinkan melihat detail nilai kelas yang diampunya',
+        };
+      }
+      return {
+        allowed: false,
+        statusCode: 403,
+        reason: `Akses ditolak: Dosen bukan pengampu kelas untuk nilai ID ${gradeId}`,
+      };
+    }
+
+    return {
+      allowed: false,
+      statusCode: 403,
+      reason: `Role '${user.role}' tidak memiliki izin mengakses data nilai`,
+    };
+  }
+
+  // 3. Kebijakan untuk: PUT /nilai/:id
   const putNilaiMatch = normalizedPath.match(/^\/nilai\/(\d+)$/);
   if (upperMethod === 'PUT' && putNilaiMatch) {
     const gradeId = parseInt(params.id || putNilaiMatch[1], 10);
@@ -114,7 +171,7 @@ function evaluatePolicy(context) {
     };
   }
 
-  // 3. Kebijakan untuk: POST /kelas/:id/finalisasi
+  // 4. Kebijakan untuk: POST /kelas/:id/finalisasi
   const postFinalisasiMatch = normalizedPath.match(/^\/kelas\/(\d+)\/finalisasi$/);
   if (upperMethod === 'POST' && postFinalisasiMatch) {
     const classId = parseInt(params.id || postFinalisasiMatch[1], 10);
@@ -163,7 +220,7 @@ function evaluatePolicy(context) {
     };
   }
 
-  // 4. Kebijakan untuk: GET /transkrip/:nim
+  // 5. Kebijakan untuk: GET /transkrip/:nim
   const getTranskripMatch = normalizedPath.match(/^\/transkrip\/([a-zA-Z0-9_-]+)$/);
   if (upperMethod === 'GET' && getTranskripMatch) {
     const targetNim = params.nim || getTranskripMatch[1];
@@ -198,7 +255,7 @@ function evaluatePolicy(context) {
     };
   }
 
-  // 5. Kebijakan untuk: POST /transkrip/sinkron
+  // 6. Kebijakan untuk: POST /transkrip/sinkron
   if (upperMethod === 'POST' && (normalizedPath === '/transkrip/sinkron' || normalizedPath === '/transkrip/sinkron/')) {
     if (user.role === ROLES.SERVICE) {
       return {

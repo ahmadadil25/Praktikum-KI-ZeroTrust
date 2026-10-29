@@ -34,6 +34,19 @@ function toLetterGrade(score) {
 }
 
 /**
+ * Konversi nilai huruf ke bobot angka untuk penghitungan IPK
+ */
+function getGradePoint(letterGrade) {
+  switch (letterGrade) {
+    case 'A': return 4.0;
+    case 'B': return 3.0;
+    case 'C': return 2.0;
+    case 'D': return 1.0;
+    default: return 0.0;
+  }
+}
+
+/**
  * GET /transkrip/:nim
  * Mahasiswa hanya melihat transkrip miliknya; Admin dapat melihat transkrip seluruh mahasiswa
  */
@@ -73,6 +86,11 @@ app.get('/transkrip/:nim', (req, res) => {
   `).all(student.id);
 
   const totalSks = transcripts.reduce((sum, item) => sum + (item.sks || 0), 0);
+  const totalPoints = transcripts.reduce(
+    (sum, item) => sum + (item.sks || 0) * getGradePoint(item.nilai_huruf),
+    0
+  );
+  const ipk = totalSks > 0 ? Number((totalPoints / totalSks).toFixed(2)) : 0.0;
 
   return res.status(200).json({
     status: 'success',
@@ -82,6 +100,7 @@ app.get('/transkrip/:nim', (req, res) => {
     },
     total_mata_kuliah: transcripts.length,
     total_sks: totalSks,
+    ipk,
     transkrip: transcripts,
   });
 });
@@ -125,6 +144,7 @@ app.post('/transkrip/sinkron', (req, res) => {
     `).all(kelas_id);
   }
 
+  // Sinkronisasi idempoten menggunakan transaksi database (mencegah data duplikat jika diulang)
   const syncTx = db.transaction(() => {
     const insertOrUpdate = db.prepare(`
       INSERT INTO transcripts (mahasiswa_id, kelas_id, kode_kelas, mata_kuliah, sks, nilai_angka, nilai_huruf, finalized_at)
@@ -158,6 +178,15 @@ app.post('/transkrip/sinkron', (req, res) => {
     status: 'success',
     message: `Berhasil menyinkronkan ${gradesToSync.length} nilai ke transkrip mahasiswa`,
     synced_count: gradesToSync.length,
+  });
+});
+
+// Penanganan error terpusat tanpa membocorkan stack trace ke client
+app.use((err, req, res, next) => {
+  console.error('[SERVICE TRANSKRIP ERROR]', err.message);
+  res.status(err.status || 500).json({
+    error: 'Internal Server Error',
+    reason: 'Terjadi kesalahan pada Service Transkrip',
   });
 });
 

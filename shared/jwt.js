@@ -3,6 +3,8 @@ const crypto = require('crypto');
 const config = require('./config');
 const { ROLES } = require('./constants');
 
+const TOKEN_ISSUER = 'zero-trust-gateway';
+
 /**
  * Generate Access Token JWT (default 10 menit)
  */
@@ -18,6 +20,7 @@ function generateAccessToken(user, deviceId) {
 
   return jwt.sign(payload, config.jwt.accessSecret, {
     expiresIn: config.jwt.accessExpiresIn,
+    issuer: TOKEN_ISSUER,
   });
 }
 
@@ -47,6 +50,7 @@ function generateServiceToken(serviceName = 'service-nilai') {
 
   return jwt.sign(payload, config.jwt.serviceSecret, {
     expiresIn: config.jwt.serviceExpiresIn,
+    issuer: TOKEN_ISSUER,
   });
 }
 
@@ -55,7 +59,10 @@ function generateServiceToken(serviceName = 'service-nilai') {
  */
 function verifyAccessToken(token) {
   try {
-    return { valid: true, payload: jwt.verify(token, config.jwt.accessSecret) };
+    const payload = jwt.verify(token, config.jwt.accessSecret, {
+      issuer: TOKEN_ISSUER,
+    });
+    return { valid: true, payload };
   } catch (error) {
     return {
       valid: false,
@@ -66,11 +73,23 @@ function verifyAccessToken(token) {
 }
 
 /**
- * Verifikasi Service Token JWT
+ * Verifikasi Service Token JWT (tanda tangan, masa berlaku, penerbit, dan role service)
  */
 function verifyServiceToken(token) {
   try {
-    return { valid: true, payload: jwt.verify(token, config.jwt.serviceSecret) };
+    const payload = jwt.verify(token, config.jwt.serviceSecret, {
+      issuer: TOKEN_ISSUER,
+    });
+
+    if (payload.role !== ROLES.SERVICE) {
+      return {
+        valid: false,
+        expired: false,
+        error: `Role token bukan service: '${payload.role}'`,
+      };
+    }
+
+    return { valid: true, payload };
   } catch (error) {
     return {
       valid: false,
@@ -105,6 +124,7 @@ function verifyToken(token) {
 }
 
 module.exports = {
+  TOKEN_ISSUER,
   generateAccessToken,
   generateRefreshToken,
   hashToken,

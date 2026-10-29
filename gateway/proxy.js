@@ -2,7 +2,8 @@ const config = require('../shared/config');
 
 /**
  * Mekanisme Forwarding Proxy API Gateway ke Resource Services
- * Menyisipkan header internal X-Gateway-Secret dan meneruskan token autentikasi.
+ * Menyisipkan header internal X-Gateway-Secret resmi dan meneruskan token autentikasi.
+ * Menghapus segala header palsu yang mungkin dikirim oleh client (Anti-spoofing).
  *
  * @param {string} targetBaseUrl - Base URL service tujuan (cth: http://localhost:3001)
  */
@@ -19,7 +20,13 @@ function createServiceProxy(targetBaseUrl) {
         }
       }
 
-      // Sisipkan Gateway Secret wajib sesuai spesifikasi Zero Trust (NIST SP 800-207)
+      // Hapus header spoofing yang mungkin dikirim client
+      delete forwardHeaders['x-gateway-secret'];
+      delete forwardHeaders['x-user-role'];
+      delete forwardHeaders['x-user-id'];
+      delete forwardHeaders['x-role'];
+
+      // Sisipkan Gateway Secret resmi wajib sesuai spesifikasi Zero Trust (NIST SP 800-207)
       forwardHeaders['x-gateway-secret'] = config.gatewaySecret;
 
       const fetchOptions = {

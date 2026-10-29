@@ -444,3 +444,4 @@ module.exports = {
   handleLogout,
   handleServiceToken,
 };
+
