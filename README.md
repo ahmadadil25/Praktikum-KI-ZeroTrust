@@ -294,5 +294,3 @@ npm test
 
 ---
 
-## 8. Laporan Audit Keamanan (Security Review)
-Laporan mendalam hasil audit keamanan Zero Trust, analisis kerentanan (CWE/OWASP), dan mitigasi yang telah diterapkan dapat dibaca pada file [SECURITY_REVIEW.md](file:///./SECURITY_REVIEW.md).
