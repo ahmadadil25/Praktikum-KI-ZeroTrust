@@ -5,6 +5,10 @@ const { getDb } = require('../shared/db');
 const { ROLES, DEVICE_STATUS, GRADE_STATUS } = require('../shared/constants');
 
 function runSeed(dbInstance = null) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Seed akun demo dengan kredensial publik tidak boleh dijalankan pada mode production.');
+  }
+
   const db = dbInstance || getDb();
 
   // Pastikan skema dijalankan

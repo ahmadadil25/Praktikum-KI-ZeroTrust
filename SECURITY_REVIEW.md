@@ -148,8 +148,8 @@ Berikut adalah rekapitulasi temuan keamanan yang diidentifikasi selama audit, ti
 * **Verifikasi**: Uji otomatis `SR.11` memvalidasi keberadaan kedua header tersebut pada respon HTTP.
 
 ### SEC-09: Pencegahan Kunci Rahasia Bawaan (Default Secret)
-* **Deskripsi**: File `shared/config.js` memiliki string fallback default jika variabel `.env` tidak terdefinisi.
-* **Perbaikan**: Ditambahkan pemeriksaan saat startup: jika `NODE_ENV === 'production'` dan terdeteksi kunci rahasia mengandung kata `'default'`, sistem mengeluarkan peringatan tegas di log konsol.
+* **Deskripsi**: Secret bawaan yang statis dapat diketahui publik dan tidak aman digunakan oleh deployment.
+* **Perbaikan**: Tidak ada secret statis pada kode atau template `.env.example`. Mode lokal membuat secret acak yang disimpan dalam berkas lokal yang diabaikan Git agar tetap sama di seluruh proses layanan. Mode `production` gagal saat startup jika salah satu dari lima secret kosong, placeholder, kurang dari 32 karakter, atau duplikat. Seeding dan reset akun demo juga ditolak pada mode `production`.
 
 ---
 

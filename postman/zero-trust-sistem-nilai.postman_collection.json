@@ -35,6 +35,21 @@
       "key": "refreshToken",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "serviceClientId",
+      "value": "service-nilai-client",
+      "type": "string"
+    },
+    {
+      "key": "serviceClientSecret",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "gatewaySecret",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -374,7 +389,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"client_id\": \"service-nilai-client\",\n  \"client_secret\": \"[REDACTED-SECRET]\"\n}"
+              "raw": "{\n  \"client_id\": \"{{serviceClientId}}\",\n  \"client_secret\": \"{{serviceClientSecret}}\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/auth/service",
@@ -1309,7 +1324,7 @@
             "header": [
               {
                 "key": "X-Gateway-Secret",
-                "value": "[REDACTED-SECRET]"
+                "value": "{{gatewaySecret}}"
               }
             ],
             "url": {

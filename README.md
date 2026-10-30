@@ -97,11 +97,13 @@ flowchart TD
 
 ## 3. Akun Demo & Perangkat Terdaftar
 
-Semua akun demo menggunakan password default praktikum:
+Semua akun di bawah adalah data sintetis untuk demo lokal, bukan kredensial produksi. Seed demo dinonaktifkan pada mode `production`.
+
+Semua akun demo menggunakan password praktikum yang diketahui publik:
 ```
 Password123!
 ```
-*(Tersimpan dalam bentuk hash `bcrypt` di database, bukan plain text).*
+*(Tersimpan dalam bentuk hash `bcrypt` di database, bukan plain text. Jangan gunakan password ini pada sistem nyata.)*
 
 | Username | Nama Lengkap | Role | NIM | Device ID Terdaftar | Keterangan & Hak Akses |
 |---|---|---|---|---|---|
@@ -116,7 +118,7 @@ Password123!
 
 ## 4. Konfigurasi Environment (`.env`)
 
-Konfigurasi disimpan pada file `.env` di root direktori (template di `.env.example`):
+Konfigurasi disimpan pada file `.env` di root direktori (template di `.env.example`). File `.env` tidak masuk Git. Jika secret tidak diisi saat berjalan lokal, aplikasi membuat kunci acak bersama di `.local-secrets.json` (juga diabaikan Git), agar seluruh proses layanan menggunakan kunci yang sama. Mode `production` menolak secret yang kosong, placeholder, kurang dari 32 karakter, atau duplikat. Gunakan lima secret acak yang berbeda untuk `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `JWT_SERVICE_SECRET`, `GATEWAY_SECRET`, dan `SERVICE_CLIENT_SECRET`.
 
 | Variabel | Default | Deskripsi |
 |---|---|---|
@@ -126,15 +128,15 @@ Konfigurasi disimpan pada file `.env` di root direktori (template di `.env.examp
 | `SERVICE_NILAI_URL` | `http://localhost:3001` | URL target proxy gateway untuk Service Nilai |
 | `SERVICE_TRANSKRIP_URL` | `http://localhost:3002` | URL target proxy gateway untuk Service Transkrip |
 | `GATEWAY_URL` | `http://localhost:3000` | URL Gateway yang dipanggil oleh Service Nilai |
-| `JWT_ACCESS_SECRET` | `zt-access-secret-...` | Kunci simetris penandatanganan Access Token |
+| `JWT_ACCESS_SECRET` | Acak saat lokal; wajib diisi saat production | Kunci simetris penandatanganan Access Token |
 | `JWT_ACCESS_EXPIRES_IN` | `10m` | Durasi masa berlaku Access Token (10 menit) |
-| `JWT_REFRESH_SECRET` | `zt-refresh-secret-...` | Kunci simetris penandatanganan Refresh Token |
+| `JWT_REFRESH_SECRET` | Acak saat lokal; wajib diisi saat production | Kunci simetris penandatanganan Refresh Token |
 | `JWT_REFRESH_EXPIRES_IN` | `1d` | Durasi masa berlaku Refresh Token (1 hari) |
-| `JWT_SERVICE_SECRET` | `zt-service-secret-...`| Kunci penandatanganan Service Token (5 menit) |
+| `JWT_SERVICE_SECRET` | Acak saat lokal; wajib diisi saat production | Kunci penandatanganan Service Token (5 menit) |
 | `JWT_SERVICE_EXPIRES_IN` | `5m` | Durasi masa berlaku Service Token (5 menit) |
-| `GATEWAY_SECRET` | `zt-gateway-internal-...`| Secret rahasia yang disisipkan Gateway PEP ke service |
+| `GATEWAY_SECRET` | Acak saat lokal; wajib diisi saat production | Secret rahasia yang disisipkan Gateway PEP ke service |
 | `SERVICE_CLIENT_ID` | `service-nilai-client` | Client ID Service Nilai untuk meminta Service Token |
-| `SERVICE_CLIENT_SECRET` | `service-nilai-internal-...`| Client Secret Service Nilai |
+| `SERVICE_CLIENT_SECRET` | Acak saat lokal; wajib diisi saat production | Client Secret Service Nilai |
 | `DB_PATH` | `./data/database.sqlite` | Lokasi file database SQLite bersama |
 | `ACCESS_HOURS_START` | `7` | Jam mulai operasional perubahan nilai (07.00 WIB) |
 | `ACCESS_HOURS_END` | `21` | Jam selesai operasional perubahan nilai (21.00 WIB) |
@@ -154,6 +156,7 @@ Untuk melakukan inisialisasi awal (idempotent, aman dijalankan berulang):
 ```bash
 npm run seed
 ```
+Perintah ini membuat akun demo dengan kredensial publik di atas dan hanya boleh digunakan untuk pengembangan atau praktikum lokal. Perintah `npm run seed` dan `npm run reset` akan ditolak saat `NODE_ENV=production`.
 Jika ingin mereset seluruh database ke kondisi awal bersih praktikum (drop & re-seed data demo):
 ```bash
 npm run reset
@@ -258,6 +261,7 @@ Koleksi ini mencakup 28 pengujian yang dikelompokkan ke dalam 5 folder skenario:
 *Cara Menggunakan di Postman:*
 1. Buka Postman -> Klik **Import** -> Pilih file `postman/zero-trust-sistem-nilai.postman_collection.json`.
 2. Jalankan request `1.1 Login Dosen Budi` terlebih dahulu; script tes akan otomatis menyimpan `tokenDosenBudi` dan variabel lain ke Collection Variables.
+3. Untuk pengujian token service, isi variabel `serviceClientId`, `serviceClientSecret`, dan `gatewaySecret` pada Collection Variables dengan nilai yang sama dari `.env` atau `.local-secrets.json`.
 
 ---
 

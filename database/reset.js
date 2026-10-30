@@ -2,6 +2,10 @@ const { getDb } = require('../shared/db');
 const { runSeed } = require('./seed');
 
 function resetDatabase() {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Reset database demo tidak boleh dijalankan pada mode production.');
+  }
+
   const db = getDb();
   console.log('[RESET] Menghapus semua tabel...');
   db.exec(`
