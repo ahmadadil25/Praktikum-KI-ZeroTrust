@@ -2,6 +2,11 @@
 > Implementasi Arsitektur Keamanan Zero Trust (NIST SP 800-207) pada Sistem Pengelolaan Nilai Akademik.  
 > Tugas Praktikum Individu Keamanan Informasi (KP70065004) · Informatika Universitas Siliwangi.
 
+## Identitas Mahasiswa
+
+- **Nama:** Achmad Adil Arasy Darmawan
+- **NPM:** 247006111128
+
 ---
 
 ## 1. Arsitektur Sistem & Prinsip Zero Trust
